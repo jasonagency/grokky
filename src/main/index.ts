@@ -465,6 +465,9 @@ app.whenReady().then(async () => {
               const rect = button.getBoundingClientRect();
               if (rect.height < 30) violations.push('.sidebar-footer button ' + index + ' collapsed');
             });
+            const providerButtons = [...document.querySelectorAll('.provider-switch button')];
+            if (providerButtons.length !== 3) violations.push('provider switch does not expose Codex, OpenRouter, and Pi');
+            if (!providerButtons.some((button) => button.textContent?.trim() === 'Pi')) violations.push('Pi provider button is missing');
             if (['session-delete', 'session-delete-click'].includes(${JSON.stringify(smokeView)})) {
               const entry = document.querySelector('.session-entry')?.getBoundingClientRect();
               const item = document.querySelector('.session-item')?.getBoundingClientRect();

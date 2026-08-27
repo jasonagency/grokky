@@ -35,6 +35,7 @@ npm run dev
 | `npm run smoke:openrouter` | Basic live OpenRouter chat | OpenRouter |
 | `npm run smoke:openrouter-crew` | Parallel specialists plus lead | OpenRouter |
 | `npm run smoke:openrouter-web` | Auditable server-side web search | OpenRouter |
+| `npm run smoke:pi` | Native SDK streaming, persistent session, and usage | Pi provider credential |
 | `npm run smoke:electron` | Launch packaged renderer fixture and UI assertions | No |
 | `npm run package:mac:dir` | Build and verify an unpacked Apple Silicon app on macOS | No |
 | `npm run package:mac` | Build and verify an Apple Silicon DMG on macOS | No |

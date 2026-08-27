@@ -12,7 +12,7 @@ import type {
   SandboxMode,
 } from "./contracts";
 
-const providers = new Set<ProviderId>(["codex", "openrouter"]);
+const providers = new Set<ProviderId>(["codex", "openrouter", "pi"]);
 const reasoning = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
 const sandboxModes = new Set<SandboxMode>(["read-only", "workspace-write"]);
 const projectModes = new Set<ProjectMode>(["project", "none"]);

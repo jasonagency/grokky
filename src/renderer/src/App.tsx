@@ -75,6 +75,14 @@ const OPENROUTER_SUGGESTIONS = [
   "minimax/minimax-m2",
 ];
 
+const PI_MODEL_SUGGESTIONS = [
+  "auto",
+  "anthropic/claude-sonnet-4-6",
+  "openai/gpt-5.2",
+  "openrouter/openai/gpt-5.2",
+  "openrouter/anthropic/claude-sonnet-4.6",
+];
+
 const CODEX_MODEL_CHOICES: Array<SelectChoice<string>> = CODEX_MODELS.map((model) => ({ value: model, label: model }));
 const REASONING_CHOICES: Array<SelectChoice<ReasoningEffort>> = [
   { value: "low", label: "Low", detail: "Fast and economical" },
@@ -292,7 +300,7 @@ function compactPath(pathname: string): string {
 }
 
 function providerName(provider: ProviderId): string {
-  return provider === "codex" ? "Codex" : "OpenRouter";
+  return provider === "codex" ? "Codex" : provider === "pi" ? "Pi" : "OpenRouter";
 }
 
 function InlineLoader({ label = "Working", quiet = false }: { label?: string; quiet?: boolean }) {
@@ -711,8 +719,8 @@ function CrewPicker({ conversation, agents, enabled, maxAgents, onOpenAgents, on
       </button>
       {open && (
         <div className="crew-picker-popover" role="dialog" aria-label="Choose the crew">
-          <header><strong>Choose the crew</strong><small>{conversation.provider === "openrouter" ? "Parallel read-only scouts, then one lead" : "Codex spawns and coordinates these roles"}</small></header>
-          {!enabled && <div className="crew-picker-warning"><WarningCircle size={15} />Multi-agent orchestration is disabled.</div>}
+          <header><strong>Choose the crew</strong><small>{conversation.provider === "openrouter" ? "Parallel read-only scouts, then one lead" : conversation.provider === "pi" ? "Use the task graph to coordinate multiple Pi agents" : "Codex spawns and coordinates these roles"}</small></header>
+          {!enabled && <div className="crew-picker-warning"><WarningCircle size={15} />{conversation.provider === "pi" ? "Pi chat runs are solo; durable tasks can assign multiple Pi agents." : "Multi-agent orchestration is disabled."}</div>}
           <div className="crew-picker-list">
             {available.map((agent) => {
               const checked = conversation.selectedAgentIds.includes(agent.id);
@@ -985,7 +993,7 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
       <div className="composer-meta">
         <ProjectPicker conversation={conversation} recentDirectories={recentDirectories} attention={preflightTarget === "project"} openRequest={projectOpenRequest} onError={onError} />
         <AccessPicker conversation={conversation} attention={preflightTarget === "access"} openRequest={accessOpenRequest} onError={onError} />
-        <CrewPicker conversation={conversation} agents={agents} enabled={multiAgentEnabled} maxAgents={maxAgents} onOpenAgents={onOpenAgents} onError={onError} />
+        <CrewPicker conversation={conversation} agents={agents} enabled={multiAgentEnabled && conversation.provider !== "pi"} maxAgents={maxAgents} onOpenAgents={onOpenAgents} onError={onError} />
         {preflightTarget && <span className="composer-preflight-note"><WarningCircle size={12} />{preflightTarget === "project" ? "Choose a project to continue" : "Choose Full access to continue"}</span>}
         <span className={`web-access-status ${webSearchEnabled ? "enabled" : ""}`} title={webSearchEnabled ? "Live web search is enabled" : "Live web search is disabled"}><GlobeHemisphereWest size={12} />Web {webSearchEnabled ? "on" : "off"}</span>
         <span>Enter to send</span>
@@ -1752,12 +1760,15 @@ export function App() {
               <div className="provider-switch" aria-label="Provider">
                 <button type="button" aria-pressed={active.provider === "codex"} className={active.provider === "codex" ? "active" : ""} onClick={() => void updateProvider("codex")}><span aria-hidden="true" />Codex</button>
                 <button type="button" aria-pressed={active.provider === "openrouter"} className={active.provider === "openrouter" ? "active" : ""} onClick={() => void updateProvider("openrouter")}><span aria-hidden="true" />OpenRouter</button>
+                <button type="button" aria-pressed={active.provider === "pi"} className={active.provider === "pi" ? "active" : ""} onClick={() => void updateProvider("pi")}><span aria-hidden="true" />Pi</button>
               </div>
               <i className="toolbar-separator" aria-hidden="true" />
               <div className="toolbar-field model-field">
                 <Robot size={15} weight="duotone" />
                 {active.provider === "codex" ? (
                   <SelectMenu value={active.model} choices={CODEX_MODEL_CHOICES} label="Codex model" compact disabled={active.status === "running"} onChange={(model) => void window.grokky.updateConversation(active.id, { model }).catch((error) => setUiError(error.message))} />
+                ) : active.provider === "pi" ? (
+                  <ModelCombobox value={active.model} suggestions={PI_MODEL_SUGGESTIONS} label="Pi model" disabled={active.status === "running"} onCommit={(model) => void window.grokky.updateConversation(active.id, { model }).catch((error) => setUiError(error.message))} />
                 ) : (
                   <ModelCombobox value={active.model} suggestions={OPENROUTER_SUGGESTIONS} label="OpenRouter model" disabled={active.status === "running"} onCommit={(model) => void window.grokky.updateConversation(active.id, { model }).catch((error) => setUiError(error.message))} />
                 )}

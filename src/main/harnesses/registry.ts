@@ -10,6 +10,7 @@ import type { ProviderRunContext } from "../providers/types";
 import { CodexSdkAdapter } from "./codex-sdk-adapter";
 import { CodexAppServerAdapter } from "./codex-app-server-adapter";
 import { OpenRouterAdapter } from "./openrouter-adapter";
+import { PiAdapter } from "./pi-adapter";
 import type { HarnessAdapter } from "./types";
 import { validateHarnessEvent } from "./types";
 
@@ -100,7 +101,7 @@ export class HarnessRegistry {
   }
 
   providerStatuses(snapshot: HarnessRegistryEntry[]): ProviderStatus[] {
-    return (["codex", "openrouter"] as ProviderId[]).map((provider) => {
+    return (["codex", "openrouter", "pi"] as ProviderId[]).map((provider) => {
       const entry = snapshot.find((candidate) => candidate.providerCompatibility.includes(provider));
       if (!entry) return { id: provider, ready: false, label: "Harness missing", source: "Registry", detail: `No harness supports ${provider}.` };
       return { id: provider, ...entry.health };
@@ -114,5 +115,5 @@ export class HarnessRegistry {
 
 export function createDefaultHarnessRegistry(homeDirectory: string): HarnessRegistry {
   const sdk = new CodexSdkAdapter();
-  return new HarnessRegistry([new CodexAppServerAdapter(undefined, sdk), sdk, new OpenRouterAdapter(homeDirectory)]);
+  return new HarnessRegistry([new CodexAppServerAdapter(undefined, sdk), sdk, new OpenRouterAdapter(homeDirectory), new PiAdapter(homeDirectory)]);
 }

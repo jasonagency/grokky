@@ -59,6 +59,10 @@ describe("run preflight", () => {
     await expect(controller.sendMessage(first.id, "Build a beautiful website and spin it up on localhost")).rejects.toThrow("Choose Full access");
     expect(controller.snapshot().settings.recentWorkingDirectories).toEqual([project]);
 
+    await controller.updateConversation(first.id, { selectedAgentIds: ["builtin:explorer"] });
+    await controller.updateConversation(first.id, { provider: "pi" });
+    expect(controller.snapshot().conversations.find((item) => item.id === first.id)).toMatchObject({ provider: "pi", harnessId: "pi-native", model: "auto", selectedAgentIds: [] });
+
     const secondId = await controller.createConversation();
     expect(controller.snapshot().conversations.find((item) => item.id === secondId)).toMatchObject({ projectMode: "project", workingDirectory: project });
   });

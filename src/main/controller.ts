@@ -21,7 +21,7 @@ import type {
   ProviderStatus,
   RunOutcome,
 } from "../shared/contracts";
-import { CODEX_MODELS, DEFAULT_OPENROUTER_MODEL, IPC } from "../shared/contracts";
+import { CODEX_MODELS, DEFAULT_OPENROUTER_MODEL, DEFAULT_PI_MODEL, IPC } from "../shared/contracts";
 import { requiresDevelopmentCommands, requiresProjectDirectory } from "../shared/run-preflight";
 import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
@@ -311,8 +311,9 @@ export class MainController {
     }
     if (nextPatch.provider && nextPatch.provider !== conversation.provider) {
       conversation.threadId = undefined;
-      conversation.model = nextPatch.provider === "codex" ? CODEX_MODELS[0] : DEFAULT_OPENROUTER_MODEL;
+      conversation.model = nextPatch.provider === "codex" ? CODEX_MODELS[0] : nextPatch.provider === "pi" ? DEFAULT_PI_MODEL : DEFAULT_OPENROUTER_MODEL;
       conversation.harnessId = this.harnessRegistry.compatibilityId(nextPatch.provider);
+      if (nextPatch.provider === "pi") conversation.selectedAgentIds = [];
     }
     if (
       (nextPatch.projectMode !== undefined && nextPatch.projectMode !== conversation.projectMode)
@@ -538,12 +539,17 @@ export class MainController {
     const computerAccess = structuredClone(this.state.computerAccess);
     const onEvent = (event: ProviderEvent) => this.applyProviderEvent(conversationId, event);
     const executeTool = (name: ComputerToolName, args: Record<string, unknown>, options?: { readOnly?: boolean }) => this.executeComputerTool(conversationId, name, args, options);
+    const controlTask = (taskId: string, request: TaskControlRequest) => this.controlTask(taskId, request);
     try {
-      const agents = await this.agents.selected(conversation.selectedAgentIds, conversation.workingDirectory);
+      const [agents, capabilities] = await Promise.all([
+        this.agents.selected(conversation.selectedAgentIds, conversation.workingDirectory),
+        this.capabilities.snapshot(conversation.workingDirectory),
+      ]);
+      const selectedSkillPaths = capabilities.skills.filter((skill) => skill.enabled).map((skill) => skill.path);
       this.runAgentIcons.set(conversationId, new Map(agents.flatMap((agent) => agent.icon ? [[agent.name.toLowerCase(), agent.icon] as const] : [])));
       await this.harnessRegistry.dispatch(
         conversation,
-        { conversation, settings, agents, prompt, signal: controller.signal, computerAccess, executeTool, onEvent },
+        { conversation, settings, agents, prompt, signal: controller.signal, selectedSkillPaths, computerAccess, executeTool, controlTask, onEvent },
         this.requiredHarnessCapabilities(conversation),
       );
       const current = this.state.conversations.find((item) => item.id === conversationId);

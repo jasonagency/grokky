@@ -1,7 +1,7 @@
 import type { ControlPolicyPatch, ControlRuntimeSnapshot, ProjectionChange, TaskAction, TaskControlRequest, TaskGoalDraft, TaskGraphSnapshot, WorkspaceStateSnapshot } from "./control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
 
-export type ProviderId = "codex" | "openrouter";
+export type ProviderId = "codex" | "openrouter" | "pi";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type SandboxMode = "read-only" | "workspace-write";
 export type RunStatus = "idle" | "running" | "error";
@@ -350,3 +350,4 @@ export const IPC = {
 export const CODEX_MODELS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;
 
 export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.2";
+export const DEFAULT_PI_MODEL = "auto";

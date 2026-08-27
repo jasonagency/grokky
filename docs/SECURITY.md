@@ -21,6 +21,7 @@ Security claims here apply to the source in this repository. Unsigned local buil
 | --- | --- | --- |
 | Codex sign-in material | Secret | Codex home, not Grokky state |
 | OpenRouter API key | Secret | Process environment or user-selected env file |
+| Pi provider credentials | Secret | Pi credential store or process environment |
 | Runner bearer token | Secret | Runner private state; encrypted in Grokky state |
 | Conversations and messages | Private user data | Electron user-data directory |
 | Workspace files | Potentially private | User-selected workspace |
@@ -108,6 +109,12 @@ If App Server cannot launch or complete its handshake before a turn starts, Grok
 The API key is resolved in the main process from the inherited environment or a local env file. Only the credential source description appears in provider status. The selected file path may be persisted, so users should understand that the path itself can reveal folder naming inside local state even though it is not sent to the renderer as a key value.
 
 The key is passed to the OpenRouter SDK and request headers only for the active run. It is not included in messages, activity items, usage, errors, repository files, or smoke-test fixtures.
+
+### Pi
+
+Pi runs through its native SDK in Electron's main process. It reads provider credentials from Pi's private credential store or supported environment variables; the renderer receives only readiness labels. Grokky disables Pi's built-in read, bash, edit, and write tools and disables extensions. The SDK receives only custom tools that call Grokky's existing file, command, browser, screen, automation, durable task-control, and agent-message gates. Read-only mode removes every mutating tool before session creation, and each retained tool is re-authorized at execution time.
+
+Pi session files live in Grokky-owned session storage and retain the leased workspace as their working directory. Persisted session references are accepted only from inside that storage root. Selected project guidance may load through the controlled resource loader; unselected skills, prompt templates, themes, and project extensions do not.
 
 ### Remote runner
 

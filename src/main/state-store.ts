@@ -234,7 +234,7 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
     ? item.projectMode
     : inferredProjectMode;
   const runOutcomes = new Set<NonNullable<Conversation["lastRunOutcome"]>>(["delivered", "blocked", "failed", "stopped"]);
-  const provider = item.provider === "openrouter" ? "openrouter" : "codex";
+  const provider = item.provider === "openrouter" || item.provider === "pi" ? item.provider : "codex";
   const harnessAttempts = Array.isArray(item.harnessAttempts)
     ? item.harnessAttempts.flatMap((value): HarnessAttempt[] => {
         if (!value || typeof value !== "object") return [];
@@ -261,8 +261,8 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
     id: item.id,
     title: item.title,
     provider,
-    harnessId: typeof item.harnessId === "string" ? item.harnessId : provider === "codex" ? "codex-sdk" : "openrouter-chat",
-    model: typeof item.model === "string" ? item.model : "gpt-5.6-sol",
+    harnessId: typeof item.harnessId === "string" ? item.harnessId : provider === "codex" ? "codex-sdk" : provider === "pi" ? "pi-native" : "openrouter-chat",
+    model: typeof item.model === "string" ? item.model : provider === "pi" ? "auto" : provider === "openrouter" ? "openai/gpt-5.2" : "gpt-5.6-sol",
     reasoning: ["low", "medium", "high", "xhigh"].includes(item.reasoning ?? "") ? item.reasoning! : "medium",
     sandboxMode: item.sandboxMode === "read-only" ? "read-only" : "workspace-write",
     allowCommands: item.allowCommands === true,

@@ -5,7 +5,7 @@
 <h1 align="center">Grokky</h1>
 
 <p align="center">
-  <strong>A local-first desktop cockpit for Codex, OpenRouter, and coordinated AI crews.</strong>
+  <strong>A local-first desktop cockpit for Codex, OpenRouter, Pi, and coordinated AI crews.</strong>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
   <img alt="License" src="https://img.shields.io/badge/license-UNLICENSED-a8d84e?style=flat-square" />
 </p>
 
-Grokky turns a folder on your computer into a visual AI workspace. Pick the official Codex SDK or any compatible OpenRouter model, choose a crew, define the access boundary, and watch the work unfold as messages, tool activity, specialist handoffs, approvals, and usage.
+Grokky turns a folder on your computer into a visual AI workspace. Pick Codex App Server, OpenRouter, or the native Pi SDK, define the access boundary, and watch work unfold as messages, tool activity, specialist handoffs, approvals, and usage.
 
 The interface is only the cockpit. Credentials, model processes, files, commands, native permissions, and remote-computer tokens stay behind Electron's trusted main-process boundary.
 
@@ -87,8 +87,8 @@ Grokky keeps them visible and independently configurable. A conversation records
 | Area | Capability |
 | --- | --- |
 | Conversations | Create, search, switch, cancel, and delete local chats with a confirmation step |
-| Providers | Switch between the official Codex SDK and OpenRouter per conversation |
-| Models | Select Codex models, enter any valid OpenRouter model ID, and set reasoning effort |
+| Providers | Switch between Codex App Server, OpenRouter, and the native Pi SDK per conversation |
+| Models | Select Codex models, enter OpenRouter or Pi provider/model IDs, and set reasoning effort |
 | Projects | Search recent folders, choose or create a project from the composer, or use an isolated no-project scratch folder |
 | Access | Switch each conversation between Read only, Workspace access, and Full access for local development commands |
 | Live activity | Render reasoning, plans, files, commands, tools, errors, and usage as normalized events |
