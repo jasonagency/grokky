@@ -209,6 +209,41 @@ const migrations: Migration[] = [{
       CREATE INDEX task_leases_expiry ON task_leases(expires_at);
     `);
   },
+}, {
+  version: 4,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE workspace_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE workspace_leases (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        repository_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE integration_queue (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        repository_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE INDEX workspace_leases_repository_status ON workspace_leases(repository_id, status);
+      CREATE INDEX integration_queue_status_order ON integration_queue(status, created_at);
+    `);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {

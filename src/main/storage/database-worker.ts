@@ -23,6 +23,11 @@ port.on("message", (request: DatabaseRequest) => {
     } else if (command.type === "write_task_graph") {
       database.writeTaskGraph(command.snapshot);
       response = { id: request.id, ok: true };
+    } else if (command.type === "read_workspace_state") {
+      response = { id: request.id, ok: true, value: database.readWorkspaceState() };
+    } else if (command.type === "write_workspace_state") {
+      database.writeWorkspaceState(command.snapshot);
+      response = { id: request.id, ok: true };
     } else if (command.type === "import_legacy_snapshot") {
       response = { id: request.id, ok: true, value: database.importLegacySnapshot(command.snapshot, command.source, command.importedAt) };
     } else if (command.type === "append_event") {

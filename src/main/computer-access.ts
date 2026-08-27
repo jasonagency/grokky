@@ -11,6 +11,7 @@ import type {
   ComputerPermissionStatus,
   Conversation,
 } from "../shared/contracts";
+import type { WorkspaceLease } from "../shared/control-plane-contracts";
 import type { PersistedComputerAccess, PersistedRemoteDevice } from "./state-store";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
 
@@ -303,6 +304,7 @@ export class ComputerAccessService {
     name: ComputerToolName;
     args: Record<string, unknown>;
     approvedTarget?: boolean;
+    workspaceLease?: WorkspaceLease;
   }): Promise<string> {
     const { state, conversation, name, args } = options;
     if (!state.enabled) throw new Error("Computer access is disabled");
@@ -320,6 +322,7 @@ export class ComputerAccessService {
     if (workspaceTools.has(name as WorkspaceToolName)) {
       return executeWorkspaceTool({
         root: conversation.workingDirectory,
+        lease: options.workspaceLease,
         mode: conversation.sandboxMode,
         allowCommands: conversation.allowCommands,
         name: name as WorkspaceToolName,

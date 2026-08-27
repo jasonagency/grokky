@@ -27,11 +27,14 @@ import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
 import { capabilityForTool, ComputerAccessService, newAuditId, targetForTool, type ComputerToolName } from "./computer-access";
 import type { ProviderEvent } from "./providers/types";
-import type { ControlPlaneEventType, TaskAction, TaskGoalDraft } from "../shared/control-plane-contracts";
+import type { ControlPlaneEventType, IntegrationRecord, TaskAction, TaskGoalDraft, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { LeaseReconciler } from "./control-plane/lease-reconciler";
 import type { TaskScheduler } from "./control-plane/scheduler";
+import type { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
+import { GitRepository } from "./workspaces/git-repository";
+import type { IntegrationQueue, VerificationCommand } from "./workspaces/integration-queue";
 import { boundedConversationProjection } from "./control-plane/event-projector";
 import { communicationsFromOrchestrationEvent, mergeCrewCommunications } from "./crew-communications";
 import { createDefaultHarnessRegistry, HarnessRegistry } from "./harnesses/registry";
@@ -92,6 +95,8 @@ export class MainController {
     private readonly controlPlane?: ControlPlaneService,
     private readonly harnessRegistry: HarnessRegistry = createDefaultHarnessRegistry(homeDirectory),
     private readonly taskScheduler?: TaskScheduler,
+    private readonly workspaceLeases?: WorkspaceLeaseManager,
+    private readonly integrationQueue?: IntegrationQueue,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -104,6 +109,7 @@ export class MainController {
       await this.taskScheduler.initialize();
       await new LeaseReconciler(this.taskScheduler).reconcileExpired();
     }
+    await this.workspaceLeases?.initialize();
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
     if (!this.state.conversations.length) this.createConversationInternal();
     await this.refreshProviderStatuses(false);
@@ -138,6 +144,7 @@ export class MainController {
       harnesses: this.harnesses,
       computerAccess: this.computerAccess.snapshot(this.state.computerAccess, this.activeWorkingDirectory(), this.pendingApprovals[0]),
       taskGraph: this.taskScheduler?.snapshot() ?? { revision: 0, goals: [], tasks: [] },
+      workspaceState: this.workspaceLeases?.snapshot() ?? { revision: 0, leases: [], integrations: [] },
       appVersion: this.appVersion,
     });
   }
@@ -152,6 +159,32 @@ export class MainController {
     if (!this.taskScheduler) throw new Error("The task scheduler is not available");
     await this.taskScheduler.applyAction(taskId, action);
     this.publishSnapshot();
+  }
+
+  async acquireTaskWorkspace(request: WorkspaceLeaseRequest): Promise<WorkspaceLease> {
+    if (!this.workspaceLeases || !this.taskScheduler) throw new Error("Workspace isolation is not available");
+    if (!this.taskScheduler.snapshot().tasks.some((task) => task.id === request.taskId)) throw new Error("Task was not found");
+    const lease = await this.workspaceLeases.acquire(request);
+    this.publishSnapshot();
+    return lease;
+  }
+
+  async transferTaskWorkspace(leaseId: string, holderId: string): Promise<WorkspaceLease> {
+    if (!this.workspaceLeases) throw new Error("Workspace isolation is not available");
+    const lease = await this.workspaceLeases.transfer(leaseId, holderId);
+    this.publishSnapshot();
+    return lease;
+  }
+
+  async integrateTaskWorkspace(leaseId: string, targetRef: string, verification: VerificationCommand[] = []): Promise<IntegrationRecord> {
+    if (!this.workspaceLeases || !this.integrationQueue) throw new Error("Workspace integration is not available");
+    const lease = this.workspaceLeases.snapshot().leases.find((entry) => entry.id === leaseId);
+    if (!lease?.branch || lease.kind !== "git") throw new Error("Only a Git worktree lease can be integrated");
+    const repository = await GitRepository.open(lease.root);
+    const result = await this.integrationQueue.integrate({ taskId: lease.taskId, leaseId, repository, taskBranch: lease.branch, targetRef }, verification);
+    if (result.status === "succeeded") await this.workspaceLeases.markIntegrated(leaseId);
+    this.publishSnapshot();
+    return result;
   }
 
   async createConversation(): Promise<string> {

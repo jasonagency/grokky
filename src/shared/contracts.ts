@@ -1,4 +1,4 @@
-import type { ProjectionChange, TaskAction, TaskGoalDraft, TaskGraphSnapshot } from "./control-plane-contracts";
+import type { ProjectionChange, TaskAction, TaskGoalDraft, TaskGraphSnapshot, WorkspaceStateSnapshot } from "./control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
 
 export type ProviderId = "codex" | "openrouter";
@@ -255,6 +255,7 @@ export interface AppSnapshot {
   harnesses: HarnessRegistryEntry[];
   computerAccess: ComputerAccessSnapshot;
   taskGraph: TaskGraphSnapshot;
+  workspaceState?: WorkspaceStateSnapshot;
   appVersion: string;
 }
 

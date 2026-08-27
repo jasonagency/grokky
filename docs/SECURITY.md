@@ -130,6 +130,8 @@ Additional file rules:
 
 These rules reduce accidental credential exposure and destructive edits. They do not classify arbitrary secrets stored in an innocently named source file. Users should still select a narrow workspace and review what it contains.
 
+Mutating task runs add a second boundary: Grokky records an exclusive workspace lease before exposing write-capable tools. Git tasks receive unique branches in locked linked worktrees stored under Grokky user data. Only the serialized integration queue merges accepted branches. Clean completed worktrees may be removed through Git; dirty, missing, or damaged worktrees remain visible for explicit recovery and are never force-removed. Non-Git directories permit one writer at a time, while read-only tasks receive no write tools.
+
 ## Command execution
 
 Native Codex development commands require:

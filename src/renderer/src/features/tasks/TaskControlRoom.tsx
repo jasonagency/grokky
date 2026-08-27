@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AppSnapshot } from "../../../../shared/contracts";
 import { TaskGraphView } from "./TaskGraphView";
 import { TaskInspector } from "./TaskInspector";
+import { WorkspaceLeasePanel } from "./WorkspaceLeasePanel";
 
 export function TaskControlRoom({ snapshot, onError }: { snapshot: AppSnapshot; onError(error: string): void }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(snapshot.taskGraph.tasks[0]?.id);
@@ -42,20 +43,23 @@ export function TaskControlRoom({ snapshot, onError }: { snapshot: AppSnapshot; 
       </form>
       <div className="task-control-grid">
         <TaskGraphView graph={snapshot.taskGraph} selectedTaskId={selectedTask?.id} onSelect={setSelectedTaskId} />
-        <TaskInspector
-          task={selectedTask}
-          busy={busy}
-          onAction={async (taskId, action) => {
-            setBusy(true);
-            try {
-              await window.grokky.actOnTask(taskId, action);
-            } catch (error) {
-              onError(error instanceof Error ? error.message : "Task could not be updated");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
+        <div className="task-side-panel">
+          <TaskInspector
+            task={selectedTask}
+            busy={busy}
+            onAction={async (taskId, action) => {
+              setBusy(true);
+              try {
+                await window.grokky.actOnTask(taskId, action);
+              } catch (error) {
+                onError(error instanceof Error ? error.message : "Task could not be updated");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+          <WorkspaceLeasePanel taskId={selectedTask?.id} state={snapshot.workspaceState} />
+        </div>
       </div>
     </div>
   );

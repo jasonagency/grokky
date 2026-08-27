@@ -3218,6 +3218,29 @@ button.settings-row:hover {
   padding: 13px;
 }
 
+.task-side-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-lease-panel {
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.workspace-lease-panel h4 { margin: 0 0 8px; color: var(--text-faint); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+.workspace-lease-panel > strong { color: var(--text); font-size: 11px; }
+.workspace-lease-panel p { margin: 7px 0 0; color: var(--text-soft); font-size: 10px; line-height: 1.4; }
+.workspace-lease-panel dl { display: grid; gap: 4px; margin: 9px 0 0; }
+.workspace-lease-panel dl > div { display: flex; justify-content: space-between; gap: 8px; }
+.workspace-lease-panel dt { color: var(--text-faint); }
+.workspace-lease-panel dd { max-width: 66%; margin: 0; overflow: hidden; color: var(--text-soft); text-overflow: ellipsis; white-space: nowrap; }
+.workspace-lease-panel .workspace-recovery { color: var(--warning); }
+
 .task-inspector.empty { justify-content: center; color: var(--text-faint); text-align: center; }
 .task-inspector header > span { color: var(--accent); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .task-inspector h3,

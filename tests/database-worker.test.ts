@@ -11,9 +11,11 @@ describe("control-plane database", () => {
 
     await client.initialize();
     await client.writeSnapshot('{"version":2,"marker":"first"}');
+    await client.writeWorkspaceState(JSON.stringify({ revision: 1, leases: [], integrations: [] }));
 
     expect(await client.readSnapshot()).toBe('{"version":2,"marker":"first"}');
-    expect(await client.inspect()).toMatchObject({ schemaVersion: 3, journalMode: "wal" });
+    expect(JSON.parse((await client.readWorkspaceState())!)).toEqual({ revision: 1, leases: [], integrations: [] });
+    expect(await client.inspect()).toMatchObject({ schemaVersion: 4, journalMode: "wal" });
     expect((await client.inspect()).tables).toEqual(expect.arrayContaining([
       "agents",
       "conversations",
@@ -35,6 +37,9 @@ describe("control-plane database", () => {
       "task_leases",
       "task_messages",
       "tasks",
+      "workspace_leases",
+      "workspace_state",
+      "integration_queue",
     ]));
 
     await client.close();

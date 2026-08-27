@@ -238,3 +238,62 @@ export interface TaskLeaseClaim {
   lease: TaskLease;
   checkpoint?: TaskCheckpoint;
 }
+
+export type WorkspaceLeaseKind = "git" | "directory";
+export type WorkspaceLeaseMode = "read" | "write";
+export type WorkspaceLeaseStatus = "active" | "completed" | "integrated" | "recovery";
+
+export interface WorkspaceLease {
+  id: string;
+  taskId: string;
+  repositoryId: string;
+  kind: WorkspaceLeaseKind;
+  mode: WorkspaceLeaseMode;
+  writable: boolean;
+  workspace: string;
+  root: string;
+  holderId: string;
+  status: WorkspaceLeaseStatus;
+  branch?: string;
+  baseCommit?: string;
+  recoveryReason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkspaceLeaseRequest {
+  taskId: string;
+  workspace: string;
+  holderId: string;
+  mode: WorkspaceLeaseMode;
+}
+
+export type IntegrationStatus = "queued" | "integrating" | "succeeded" | "conflict" | "failed";
+
+export interface IntegrationVerification {
+  command: string;
+  ok: boolean;
+  detail?: string;
+}
+
+export interface IntegrationRecord {
+  id: string;
+  taskId: string;
+  leaseId?: string;
+  repositoryId: string;
+  taskBranch: string;
+  targetRef: string;
+  status: IntegrationStatus;
+  resultCommit?: string;
+  conflictFiles?: string[];
+  error?: string;
+  verification: IntegrationVerification[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkspaceStateSnapshot {
+  revision: number;
+  leases: WorkspaceLease[];
+  integrations: IntegrationRecord[];
+}

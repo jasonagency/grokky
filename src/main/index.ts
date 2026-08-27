@@ -9,6 +9,8 @@ import { StateStore, sqlitePathForLegacy } from "./state-store";
 import { WorkerDatabaseClient } from "./storage/database-client";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { TaskScheduler } from "./control-plane/scheduler";
+import { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
+import { IntegrationQueue } from "./workspaces/integration-queue";
 import { IPC } from "../shared/contracts";
 
 let mainWindow: BrowserWindow | null = null;
@@ -62,6 +64,9 @@ app.whenReady().then(async () => {
   stateStore = new StateStore(legacyStatePath, app.getPath("home"), {
     database,
   });
+  const worktreeRoot = join(app.getPath("userData"), "worktrees");
+  const workspaceLeases = new WorkspaceLeaseManager(database, worktreeRoot);
+  const integrationQueue = new IntegrationQueue(worktreeRoot, (record) => workspaceLeases.recordIntegration(record));
   const controller = new MainController(
     stateStore,
     app.getPath("home"),
@@ -73,6 +78,8 @@ app.whenReady().then(async () => {
     new ControlPlaneService(database),
     undefined,
     new TaskScheduler(database, { concurrency: 4, leaseDurationMs: 30_000 }),
+    workspaceLeases,
+    integrationQueue,
   );
   mainController = controller;
   await controller.initialize();

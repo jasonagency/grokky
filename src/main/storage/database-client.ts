@@ -87,6 +87,27 @@ export class StorageDatabase {
     });
   }
 
+  readWorkspaceState(): string | null {
+    const row = this.database.prepare("SELECT payload FROM workspace_state WHERE id = 1").get() as { payload?: unknown } | undefined;
+    return typeof row?.payload === "string" ? row.payload : null;
+  }
+
+  writeWorkspaceState(snapshot: string): void {
+    const value = JSON.parse(snapshot) as import("../../shared/control-plane-contracts").WorkspaceStateSnapshot;
+    if (!Number.isInteger(value.revision) || !Array.isArray(value.leases) || !Array.isArray(value.integrations)) throw new Error("Invalid workspace state snapshot");
+    this.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO workspace_state(id, revision, payload, updated_at) VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, payload = excluded.payload, updated_at = excluded.updated_at
+      `).run(value.revision, snapshot, Date.now());
+      this.database.exec("DELETE FROM workspace_leases; DELETE FROM integration_queue;");
+      const insertLease = this.database.prepare("INSERT INTO workspace_leases(id, task_id, repository_id, status, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const lease of value.leases) insertLease.run(lease.id, lease.taskId, lease.repositoryId, lease.status, JSON.stringify(lease), lease.createdAt, lease.updatedAt);
+      const insertIntegration = this.database.prepare("INSERT INTO integration_queue(id, task_id, repository_id, status, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const integration of value.integrations) insertIntegration.run(integration.id, integration.taskId, integration.repositoryId, integration.status, JSON.stringify(integration), integration.createdAt, integration.updatedAt);
+    });
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): boolean {
     return this.transaction(() => {
       const marker = this.database.prepare("SELECT value FROM metadata WHERE key = ?").get("legacy_import_v2");
@@ -279,6 +300,14 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
     return this.enqueue(() => this.requireDatabase().writeTaskGraph(snapshot));
   }
 
+  readWorkspaceState(): Promise<string | null> {
+    return this.enqueue(() => this.requireDatabase().readWorkspaceState());
+  }
+
+  writeWorkspaceState(snapshot: string): Promise<void> {
+    return this.enqueue(() => this.requireDatabase().writeWorkspaceState(snapshot));
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
   }
@@ -360,6 +389,14 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 
   writeTaskGraph(snapshot: string): Promise<void> {
     return this.request({ type: "write_task_graph", snapshot }).then(() => undefined);
+  }
+
+  readWorkspaceState(): Promise<string | null> {
+    return this.request({ type: "read_workspace_state" });
+  }
+
+  writeWorkspaceState(snapshot: string): Promise<void> {
+    return this.request({ type: "write_workspace_state", snapshot }).then(() => undefined);
   }
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
