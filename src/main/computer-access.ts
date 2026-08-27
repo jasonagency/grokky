@@ -14,6 +14,7 @@ import type {
 import type { WorkspaceLease } from "../shared/control-plane-contracts";
 import type { PersistedComputerAccess, PersistedRemoteDevice } from "./state-store";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
+import { assertCompatibleProtocol, assertSecureRemoteEndpoint } from "../shared/remote-protocol";
 
 export type ComputerToolName = WorkspaceToolName | "browse_url" | "capture_screen" | "open_application" | "click_screen" | "type_text";
 
@@ -74,12 +75,7 @@ function defaultSecrets(): ComputerAccessSecrets {
 }
 
 function normalizedEndpoint(value: string): string {
-  const url = new URL(value.trim());
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Runner endpoint must use http or https");
-  url.pathname = url.pathname.replace(/\/$/, "");
-  url.search = "";
-  url.hash = "";
-  return url.toString().replace(/\/$/, "");
+  return assertSecureRemoteEndpoint(value.trim());
 }
 
 function isPrivateAddress(address: string): boolean {
@@ -241,12 +237,14 @@ export class ComputerAccessService {
     const payload = await jsonRequest<{
       device: { id: string; name: string; platform: string; root: string; capabilities: ComputerCapabilityId[] };
       token: string;
+      protocol?: { major: number; minor: number };
     }>(`${endpoint}/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: code.trim() }),
     });
     if (!payload.device?.id || !payload.token) throw new Error("Runner returned an invalid pairing response");
+    if (payload.protocol) assertCompatibleProtocol(payload.protocol);
     const record: PersistedRemoteDevice = {
       id: payload.device.id,
       name: payload.device.name || "Remote computer",

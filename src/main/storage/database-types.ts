@@ -21,6 +21,8 @@ export interface ControlPlaneDatabase {
   writeQualityState(snapshot: string): Promise<void>;
   readTeamState(): Promise<string | null>;
   writeTeamState(snapshot: string): Promise<void>;
+  readRemoteState(): Promise<string | null>;
+  writeRemoteState(snapshot: string): Promise<void>;
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean>;
   appendEvent(request: StoredEventAppend): Promise<EventAppendResult>;
   listEvents(): Promise<string[]>;
@@ -46,6 +48,8 @@ export type DatabaseCommand =
   | { type: "write_quality_state"; snapshot: string }
   | { type: "read_team_state" }
   | { type: "write_team_state"; snapshot: string }
+  | { type: "read_remote_state" }
+  | { type: "write_remote_state"; snapshot: string }
   | { type: "import_legacy_snapshot"; snapshot: string; source: string; importedAt: number }
   | { type: "append_event"; request: StoredEventAppend }
   | { type: "list_events" }

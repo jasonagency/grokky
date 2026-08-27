@@ -463,7 +463,9 @@ The runner prints a one-time six-digit pairing code. In Grokky, open **Settings 
 Add `--allow-write` only if the runner may accept workspace-write requests. Add `--allow-commands` only if it may accept the small command allowlist. Grokky's own conversation sandbox and capability policy still apply, creating two independent checks.
 
 > [!WARNING]
-> Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
+> Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in compatibility runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
+
+The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. It is proven through an in-process fault transport before a network deployment is enabled. Provider and MCP credentials remain on the host; the desktop retains only its revocable encrypted pairing credential.
 
 ## Persistence and chat deletion
 

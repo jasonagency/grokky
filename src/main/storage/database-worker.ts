@@ -43,6 +43,11 @@ port.on("message", (request: DatabaseRequest) => {
     } else if (command.type === "write_team_state") {
       database.writeTeamState(command.snapshot);
       response = { id: request.id, ok: true };
+    } else if (command.type === "read_remote_state") {
+      response = { id: request.id, ok: true, value: database.readRemoteState() };
+    } else if (command.type === "write_remote_state") {
+      database.writeRemoteState(command.snapshot);
+      response = { id: request.id, ok: true };
     } else if (command.type === "import_legacy_snapshot") {
       response = { id: request.id, ok: true, value: database.importLegacySnapshot(command.snapshot, command.source, command.importedAt) };
     } else if (command.type === "append_event") {

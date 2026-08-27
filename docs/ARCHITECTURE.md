@@ -326,6 +326,8 @@ Runner endpoints:
 
 The runner's disk state uses mode `0600`. Grokky stores only an Electron `safeStorage` encrypted form of the bearer token. HTTP transport is designed for loopback or an encrypted private overlay network, not direct public exposure.
 
+The agent-host protocol extends the files-only compatibility runner with independently versioned job submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. The desktop reconciles by durable cursor, ignores duplicates, requests a bounded replay at gaps, and retains stale-epoch writes only as diagnostics. Job submission is idempotent, so reconnecting or retrying the same occurrence does not create duplicate work. Harness credentials remain on the host; pairing gives the desktop only a revocable host credential encrypted by platform storage.
+
 ## Skills, MCP, connectors, and agents
 
 ```mermaid

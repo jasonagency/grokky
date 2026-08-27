@@ -6,6 +6,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ComputerCapabilityId, SandboxMode } from "../shared/contracts";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
+import { REMOTE_PROTOCOL } from "../shared/remote-protocol";
+import type { RemoteControlCommand, RemoteJobRequest } from "../shared/remote-protocol";
+import type { AgentHost } from "../runner/agent-host";
 
 interface RunnerDiskState {
   deviceId: string;
@@ -20,6 +23,7 @@ interface RunnerOptions {
   allowWrite: boolean;
   allowCommands: boolean;
   onReady?(details: { endpoint: string; code: string; deviceId: string }): void;
+  agentHostFactory?(credential: string, deviceId: string): AgentHost | Promise<AgentHost>;
 }
 
 interface RunnerHandle {
@@ -91,6 +95,8 @@ function bearer(request: IncomingMessage): string {
 export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<RunnerOptions, "root" | "statePath">): Promise<RunnerHandle> {
   const root = resolve(options.root);
   const state = await loadRunnerState(options.statePath);
+  const agentHost = options.agentHostFactory ? await options.agentHostFactory(state.token, state.deviceId) : undefined;
+  await agentHost?.initialize();
   let code = pairingCode();
   const capabilities: ComputerCapabilityId[] = ["files", ...(options.allowCommands ? ["commands" as const] : [])];
   const server = createServer(async (request, response) => {
@@ -99,6 +105,8 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
       if (request.method === "GET" && url.pathname === "/health") {
         send(response, 200, {
           ok: true,
+          protocol: REMOTE_PROTOCOL,
+          hostCapabilities: { filesCompatibility: true, agentJobs: Boolean(agentHost), ...(agentHost ? { agent: agentHost.capabilities() } : {}) },
           device: { id: state.deviceId, name: hostname() || "Grokky Runner", platform: platform(), root, capabilities },
         });
         return;
@@ -116,6 +124,8 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
         code = pairingCode();
         send(response, 200, {
           token: state.token,
+          protocol: REMOTE_PROTOCOL,
+          hostCapabilities: { filesCompatibility: true, agentJobs: Boolean(agentHost), ...(agentHost ? { agent: agentHost.capabilities() } : {}) },
           device: { id: state.deviceId, name: hostname() || "Grokky Runner", platform: platform(), root, capabilities },
         });
         return;
@@ -137,6 +147,18 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
           return;
         }
         send(response, 400, { error: "Capability is unavailable on this runner" });
+        return;
+      }
+      if (url.pathname === "/host/jobs" && agentHost) {
+        send(response, 200, { job: await agentHost.submit(state.token, body.job as RemoteJobRequest) });
+        return;
+      }
+      if (url.pathname === "/host/events" && agentHost) {
+        send(response, 200, { events: agentHost.events(state.token, Number(body.afterCursor), body.limit === undefined ? undefined : Number(body.limit)) });
+        return;
+      }
+      if (url.pathname === "/host/control" && agentHost) {
+        send(response, 200, await agentHost.control(state.token, body.command as RemoteControlCommand));
         return;
       }
       if (url.pathname === "/execute") {

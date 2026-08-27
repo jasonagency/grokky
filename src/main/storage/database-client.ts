@@ -172,6 +172,17 @@ export class StorageDatabase {
     });
   }
 
+  readRemoteState(): string | null {
+    const row = this.database.prepare("SELECT payload FROM remote_state WHERE id = 1").get() as { payload?: unknown } | undefined;
+    return typeof row?.payload === "string" ? row.payload : null;
+  }
+
+  writeRemoteState(snapshot: string): void {
+    const value = JSON.parse(snapshot) as import("../../shared/remote-protocol").RemoteReconciliationState;
+    if (!Number.isInteger(value.revision) || !Number.isInteger(value.acknowledgedCursor) || !Array.isArray(value.events) || !Array.isArray(value.diagnostics)) throw new Error("Invalid remote reconciliation state");
+    this.transaction(() => this.database.prepare(`INSERT INTO remote_state(id, revision, payload, updated_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, payload = excluded.payload, updated_at = excluded.updated_at`).run(value.revision, snapshot, Date.now()));
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): boolean {
     return this.transaction(() => {
       const marker = this.database.prepare("SELECT value FROM metadata WHERE key = ?").get("legacy_import_v2");
@@ -410,6 +421,9 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
     return this.enqueue(() => this.requireDatabase().writeTeamState(snapshot));
   }
 
+  readRemoteState(): Promise<string | null> { return this.enqueue(() => this.requireDatabase().readRemoteState()); }
+  writeRemoteState(snapshot: string): Promise<void> { return this.enqueue(() => this.requireDatabase().writeRemoteState(snapshot)); }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
   }
@@ -528,6 +542,9 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
   writeTeamState(snapshot: string): Promise<void> {
     return this.request({ type: "write_team_state", snapshot }).then(() => undefined);
   }
+
+  readRemoteState(): Promise<string | null> { return this.request({ type: "read_remote_state" }); }
+  writeRemoteState(snapshot: string): Promise<void> { return this.request({ type: "write_remote_state", snapshot }).then(() => undefined); }
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.request({ type: "import_legacy_snapshot", snapshot, source, importedAt });

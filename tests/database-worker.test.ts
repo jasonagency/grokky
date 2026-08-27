@@ -17,7 +17,7 @@ describe("control-plane database", () => {
     expect(await client.readSnapshot()).toBe('{"version":2,"marker":"first"}');
     expect(JSON.parse((await client.readWorkspaceState())!)).toEqual({ revision: 1, leases: [], integrations: [] });
     expect(JSON.parse((await client.readControlRuntime())!)).toMatchObject({ revision: 1, commands: [], notifications: [] });
-    expect(await client.inspect()).toMatchObject({ schemaVersion: 7, journalMode: "wal" });
+    expect(await client.inspect()).toMatchObject({ schemaVersion: 8, journalMode: "wal" });
     expect((await client.inspect()).tables).toEqual(expect.arrayContaining([
       "agents",
       "conversations",

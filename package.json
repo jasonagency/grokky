@@ -37,6 +37,7 @@
     "smoke:openrouter-crew": "GROKKY_LIVE_OPENROUTER_CREW=1 vitest run tests/openrouter-crew.integration.test.ts",
     "smoke:openrouter-web": "GROKKY_LIVE_OPENROUTER_WEB=1 vitest run tests/openrouter-web.integration.test.ts",
     "smoke:electron": "node scripts/smoke-electron.mjs",
+    "test:remote-host": "vitest run tests/remote-protocol.test.ts tests/host-reconciliation.integration.test.ts tests/host-offline.integration.test.ts",
     "runner": "npm run build && node out/main/runner-service.js"
   },
   "dependencies": {

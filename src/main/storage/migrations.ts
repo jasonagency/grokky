@@ -327,6 +327,11 @@ const migrations: Migration[] = [{
       CREATE INDEX agent_routines_due ON agent_routines(active, next_fire_at);
     `);
   },
+}, {
+  version: 8,
+  apply(database) {
+    database.exec(`CREATE TABLE remote_state (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL) STRICT;`);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {
