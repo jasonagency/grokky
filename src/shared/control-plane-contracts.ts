@@ -495,7 +495,7 @@ export interface RouteDecision {
   rejections: RouteRejection[];
 }
 
-export type NotificationType = "task-terminal" | "approval" | "budget-pause" | "routine-failed" | "integration-conflict" | "remote-disconnect" | "update-available";
+export type NotificationType = "task-terminal" | "approval" | "budget-pause" | "routine-due" | "routine-failed" | "integration-conflict" | "remote-disconnect" | "update-available";
 
 export interface NotificationInput {
   type: NotificationType;

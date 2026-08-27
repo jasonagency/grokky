@@ -39,6 +39,10 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
   },
 ];
 
+export function agentRoleFingerprint(agent: AgentDefinition): string {
+  return createHash("sha256").update(JSON.stringify({ name: agent.name, description: agent.description, developerInstructions: agent.developerInstructions, scope: agent.scope, model: agent.model ?? null, reasoning: agent.reasoning ?? null, sandboxMode: agent.sandboxMode ?? null })).digest("hex");
+}
+
 function parseTomlString(content: string, key: string): string | undefined {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const triple = content.match(new RegExp(`^[ \\t]*${escaped}[ \\t]*=[ \\t]*(?:\"\"\"([\\s\\S]*?)\"\"\"|'''([\\s\\S]*?)''')`, "m"));

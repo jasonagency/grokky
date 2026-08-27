@@ -21,6 +21,9 @@ import type {
   McpToolClassification,
   ProviderStatus,
   RunOutcome,
+  AgentMailboxMessage,
+  AgentMemory,
+  AgentRoutine,
 } from "../shared/contracts";
 import { CODEX_MODELS, DEFAULT_OPENROUTER_MODEL, DEFAULT_PI_MODEL, IPC } from "../shared/contracts";
 import { requiresDevelopmentCommands, requiresProjectDirectory } from "../shared/run-preflight";
@@ -52,6 +55,10 @@ import type { HarnessMcpTool } from "./providers/types";
 import type { TraceService } from "./quality/trace-service";
 import type { ReplayService } from "./quality/replay-service";
 import type { EvalService } from "./quality/eval-service";
+import type { AgentRuntimeService } from "./team/agent-runtime-service";
+import type { MailboxService } from "./team/mailbox-service";
+import type { MemoryService } from "./team/memory-service";
+import type { RoutineService } from "./team/routine-service";
 
 function id(): string {
   return randomUUID().replaceAll("-", "");
@@ -96,6 +103,7 @@ export class MainController {
   private readonly pendingApprovals: ComputerApprovalRequest[] = [];
   private readonly approvalResolvers = new Map<string, (decision: ComputerApprovalDecision) => void>();
   private readonly sessionComputerGrants = new Map<string, Set<ComputerCapabilityId>>();
+  private routineTimer?: ReturnType<typeof setInterval>;
   private readonly capabilities: CapabilitiesService;
   private readonly agents: AgentService;
   private unsubscribeProjection?: () => void;
@@ -116,6 +124,10 @@ export class MainController {
     private readonly traces?: TraceService,
     private readonly replays?: ReplayService,
     private readonly evaluations?: EvalService,
+    private readonly teamRuntime?: AgentRuntimeService,
+    private readonly mailbox?: MailboxService,
+    private readonly memories?: MemoryService,
+    private readonly routines?: RoutineService,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -135,6 +147,12 @@ export class MainController {
     await this.traces?.applyRetention();
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
     if (!this.state.conversations.length) this.createConversationInternal();
+    if (this.teamRuntime) {
+      await this.teamRuntime.initialize();
+      await this.teamRuntime.importDefinitions(await this.agents.list(this.activeWorkingDirectory()));
+    }
+    await this.dispatchDueRoutines();
+    if (this.routines) this.routineTimer = setInterval(() => { void this.dispatchDueRoutines().catch(() => undefined); }, 60_000);
     await this.refreshProviderStatuses(false);
     await this.store.save(this.state);
   }
@@ -149,6 +167,7 @@ export class MainController {
   }
 
   async shutdown(): Promise<void> {
+    if (this.routineTimer) clearInterval(this.routineTimer);
     this.unsubscribeProjection?.();
     this.unsubscribeProjection = undefined;
     for (const run of this.runs.values()) run.abort();
@@ -170,6 +189,7 @@ export class MainController {
       taskGraph: this.taskScheduler?.snapshot() ?? { revision: 0, goals: [], tasks: [] },
       workspaceState: this.workspaceLeases?.snapshot() ?? { revision: 0, leases: [], integrations: [] },
       controlRuntime: this.steering?.snapshot(),
+      team: this.teamRuntime?.snapshot(),
       appVersion: this.appVersion,
     });
   }
@@ -619,25 +639,105 @@ export class MainController {
   }
 
   async getAgents(): Promise<AgentDefinition[]> {
-    return this.agents.list(this.activeWorkingDirectory());
+    const agents = await this.agents.list(this.activeWorkingDirectory());
+    await this.teamRuntime?.importDefinitions(agents);
+    return agents;
   }
 
   async createAgent(draft: AgentDraft): Promise<AgentDefinition[]> {
-    return this.agents.create(draft, this.activeWorkingDirectory());
+    const agents = await this.agents.create(draft, this.activeWorkingDirectory());
+    await this.teamRuntime?.importDefinitions(agents);
+    this.publishSnapshot();
+    return agents;
   }
 
   async updateAgent(agentId: string, draft: AgentDraft): Promise<AgentDefinition[]> {
-    return this.agents.update(agentId, draft, this.activeWorkingDirectory());
+    const agents = await this.agents.update(agentId, draft, this.activeWorkingDirectory());
+    await this.teamRuntime?.importDefinitions(agents);
+    this.publishSnapshot();
+    return agents;
   }
 
   async deleteAgent(agentId: string): Promise<AgentDefinition[]> {
+    const assigned = this.taskScheduler?.snapshot().tasks.filter((task) => task.assignment.agentId === agentId && !new Set(["succeeded", "failed", "canceled"]).has(task.status)) ?? [];
+    if (assigned.length) throw new Error(`Reassign or cancel ${assigned.length} active task(s) before deleting this agent`);
     const agents = await this.agents.delete(agentId, this.activeWorkingDirectory());
     const valid = new Set(agents.map((agent) => agent.id));
     for (const conversation of this.state.conversations) {
       conversation.selectedAgentIds = conversation.selectedAgentIds.filter((id) => valid.has(id));
     }
     await this.commit();
+    await this.teamRuntime?.setStatus(agentId, "deleted");
     return agents;
+  }
+
+  async sendAgentMessage(input: Omit<AgentMailboxMessage, "id" | "acknowledgedBy" | "createdAt">) {
+    if (!this.mailbox) throw new Error("Agent mailbox is not available");
+    const message = await this.mailbox.send(input);
+    this.publishSnapshot();
+    return message;
+  }
+
+  async acknowledgeAgentMessage(messageId: string, agentId: string) {
+    if (!this.mailbox) throw new Error("Agent mailbox is not available");
+    const message = await this.mailbox.acknowledge(messageId, agentId);
+    this.publishSnapshot();
+    return message;
+  }
+
+  async proposeAgentMemory(input: Pick<AgentMemory, "agentId" | "kind" | "content" | "sourceReferences">) {
+    if (!this.memories) throw new Error("Agent memory is not available");
+    const memory = await this.memories.propose(input);
+    this.publishSnapshot();
+    return memory;
+  }
+
+  async reviewAgentMemory(id: string, decision: "reviewed" | "rejected") {
+    if (!this.memories) throw new Error("Agent memory is not available");
+    const memory = await this.memories.review(id, decision);
+    this.publishSnapshot();
+    return memory;
+  }
+
+  async createAgentRoutine(input: Omit<AgentRoutine, "id" | "version" | "nextFireAt" | "lastOccurrenceKey" | "createdAt" | "updatedAt">) {
+    if (!this.routines) throw new Error("Agent routines are not available");
+    const routine = await this.routines.create(input);
+    this.publishSnapshot();
+    return routine;
+  }
+
+  async updatePersistentAgent(agentId: string, action: "pin" | "unpin" | "hide" | "archive" | "restore" | "delete") {
+    if (!this.teamRuntime) throw new Error("Persistent agent runtime is not available");
+    const active = this.taskScheduler?.snapshot().tasks.filter((task) => task.assignment.agentId === agentId && !new Set(["succeeded", "failed", "canceled"]).has(task.status)) ?? [];
+    if (action === "delete" && active.length) throw new Error(`Reassign or cancel ${active.length} active task(s) before deleting this agent`);
+    if (action === "pin" || action === "unpin") await this.teamRuntime.setPinned(agentId, action === "pin");
+    else await this.teamRuntime.setStatus(agentId, action === "restore" ? "active" : action === "hide" ? "hidden" : action === "archive" ? "archived" : "deleted");
+    this.publishSnapshot();
+    return this.teamRuntime.snapshot();
+  }
+
+  async duplicatePersistentAgent(agentId: string, name: string) {
+    if (!this.teamRuntime) throw new Error("Persistent agent runtime is not available");
+    await this.teamRuntime.duplicate(agentId, name);
+    this.publishSnapshot();
+    return this.teamRuntime.snapshot();
+  }
+
+  private async dispatchDueRoutines(): Promise<void> {
+    if (!this.routines || !this.taskScheduler) return;
+    const occurrences = await this.routines.due();
+    for (const { routine, occurrenceKey } of occurrences) {
+      const prefix = occurrenceKey.replace(/[^a-zA-Z0-9:_-]/g, "-");
+      const idMap = new Map(routine.template.nodes.map((node) => [node.id, `${prefix}:${node.id}`]));
+      await this.taskScheduler.createGoal({
+        ...structuredClone(routine.template),
+        id: prefix,
+        title: `${routine.name} · ${new Date(routine.nextFireAt).toLocaleDateString()}`,
+        nodes: routine.template.nodes.map((node) => ({ ...structuredClone(node), id: idMap.get(node.id)!, dependsOn: (node.dependsOn ?? []).map((id) => idMap.get(id) ?? id), assignment: { ...node.assignment, agentId: node.assignment?.agentId ?? routine.ownerAgentId } })),
+      });
+      await this.notifications?.notify({ type: "routine-due", title: `Routine started: ${routine.name}`, body: "A scheduled task graph was queued.", taskId: idMap.values().next().value });
+    }
+    if (occurrences.length) this.publishSnapshot();
   }
 
   private async executeRun(conversationId: string, prompt: string, controller: AbortController): Promise<void> {

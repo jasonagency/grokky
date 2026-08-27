@@ -69,6 +69,7 @@ import { activitiesForDisplay, type DisplayActivity } from "./activity-display";
 import { crewRunsForDisplay, crewRunStage, groupCrewCommunications } from "./crew-display";
 import { TaskControlRoom } from "./features/tasks/TaskControlRoom";
 import { McpToolPolicy } from "./features/team/McpToolPolicy";
+import { AgentWorkspace } from "./features/team/AgentWorkspace";
 import { TraceExplorer } from "./features/traces/TraceExplorer";
 import { ReplayDialog } from "./features/traces/ReplayDialog";
 import { EvalDashboard } from "./features/evaluations/EvalDashboard";
@@ -1277,7 +1278,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   async function removeAgent() {
     if (!editingAgentId) return;
     const current = agents.find((agent) => agent.id === editingAgentId);
-    if (!current || !window.confirm(`Delete ${current.name}? This removes its local agent definition.`)) return;
+    if (!current || !window.confirm(`Delete ${current.name}? This removes its local definition and disables its routines. Shared files and signed-in sessions on agent computers may remain.`)) return;
     setAgentBusy(true);
     try {
       onAgentsChange(await window.grokky.deleteAgent(editingAgentId));
@@ -1288,6 +1289,34 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     } finally {
       setAgentBusy(false);
     }
+  }
+
+  async function acknowledgeMessage(messageId: string, agentId: string) {
+    try { await window.grokky.acknowledgeAgentMessage(messageId, agentId); }
+    catch (error) { onError(error instanceof Error ? error.message : "Message could not be acknowledged"); }
+  }
+
+  async function reviewMemory(memoryId: string, decision: "reviewed" | "rejected") {
+    try { await window.grokky.reviewAgentMemory(memoryId, decision); }
+    catch (error) { onError(error instanceof Error ? error.message : "Memory could not be reviewed"); }
+  }
+
+  async function createRoutine(agentId: string, input: { name: string; localTime: string; timeZone: string }) {
+    try {
+      const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "routine";
+      await window.grokky.createAgentRoutine({ ownerAgentId: agentId, name: input.name, template: { id: `routine-${slug}`, title: input.name, objective: input.name, nodes: [] }, schedule: { localTime: input.localTime, timeZone: input.timeZone }, targetHostId: snapshot.computerAccess.activeDeviceId, budgetUsd: 1, approvalBoundary: "external-side-effects", active: true });
+    } catch (error) { onError(error instanceof Error ? error.message : "Routine could not be scheduled"); }
+  }
+
+  async function persistentAgentAction(agentId: string, action: "pin" | "unpin" | "hide" | "archive" | "restore" | "delete") {
+    if (action === "delete" && !window.confirm("Delete this persistent teammate? Active tasks must be reassigned first, and shared files or signed-in sessions may remain.")) return;
+    try { await window.grokky.updatePersistentAgent(agentId, action); }
+    catch (error) { onError(error instanceof Error ? error.message : "Agent lifecycle could not be updated"); }
+  }
+
+  async function duplicatePersistentAgent(agentId: string, name: string) {
+    try { await window.grokky.duplicatePersistentAgent(agentId, name); }
+    catch (error) { onError(error instanceof Error ? error.message : "Agent could not be duplicated"); }
   }
 
   const navItems: Array<{ id: SettingsTab; label: string; icon: typeof SlidersHorizontal }> = [
@@ -1563,6 +1592,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                     <span className="settings-copy"><strong>Agent updates in chat</strong><small>Let Codex announce delegation and handoffs as they happen.</small></span>
                     <Switch checked={snapshot.settings.interruptAgentMessage} disabled={!snapshot.settings.multiAgentEnabled} label="Agent updates in chat" onChange={(checked) => void patchSettings({ interruptAgentMessage: checked })} />
                   </div>
+                  {snapshot.team && <AgentWorkspace team={snapshot.team} onAcknowledge={(messageId, agentId) => void acknowledgeMessage(messageId, agentId)} onReviewMemory={(memoryId, decision) => void reviewMemory(memoryId, decision)} onCreateRoutine={(agentId, input) => void createRoutine(agentId, input)} onAgentAction={(agentId, action) => void persistentAgentAction(agentId, action)} onDuplicate={(agentId, name) => void duplicatePersistentAgent(agentId, name)} />}
                   <section className="agent-template-section">
                     <div className="agent-roster-header"><span><strong>Quick start</strong><small>Make one yours, then tune it.</small></span></div>
                     <div className="agent-template-strip">{AGENT_TEMPLATES.map((template) => <button key={template.label} type="button" onClick={() => beginAgentDraft(template)}><BotMascot mood="idle" identity={template.name} variant={template.icon} size="xs" /><span><strong>{template.label}</strong><small>{template.description}</small></span><Plus size={14} /></button>)}</div>

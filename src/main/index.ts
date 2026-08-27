@@ -21,6 +21,10 @@ import { ToolGateway } from "./tools/tool-gateway";
 import { TraceService } from "./quality/trace-service";
 import { ReplayService } from "./quality/replay-service";
 import { EvalService } from "./quality/eval-service";
+import { AgentRuntimeService, TeamRepository } from "./team/agent-runtime-service";
+import { MailboxService } from "./team/mailbox-service";
+import { MemoryService } from "./team/memory-service";
+import { RoutineService } from "./team/routine-service";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
@@ -88,6 +92,7 @@ app.whenReady().then(async () => {
   });
   const electronSecrets = createElectronComputerSecrets();
   const controlPlane = new ControlPlaneService(database);
+  const teamRepository = new TeamRepository(database);
   const controller = new MainController(
     stateStore,
     homeDirectory,
@@ -107,6 +112,10 @@ app.whenReady().then(async () => {
     new TraceService(controlPlane),
     new ReplayService(),
     new EvalService(database),
+    new AgentRuntimeService(teamRepository),
+    new MailboxService(teamRepository),
+    new MemoryService(teamRepository),
+    new RoutineService(teamRepository),
   );
   mainController = controller;
   await controller.initialize();
@@ -143,6 +152,11 @@ app.whenReady().then(async () => {
           await new Promise((resolve) => setTimeout(resolve, 150));
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-view="quality"]')?.click()`);
           await new Promise((resolve) => setTimeout(resolve, 350));
+        } else if (smokeView === "team-workspace") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="agents"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('.agent-workspace')?.scrollIntoView({ block: 'start' })`);
+          await new Promise((resolve) => setTimeout(resolve, 200));
         } else if (smokeView === "session-delete-click") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.click()`);
           await new Promise((resolve) => setTimeout(resolve, 150));

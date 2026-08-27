@@ -99,6 +99,31 @@ export function registerIpc(controller: MainController): void {
     if (typeof id !== "string" || !/^[a-zA-Z0-9:_-]{3,100}$/.test(id)) throw new Error("Invalid agent ID");
     return controller.deleteAgent(id);
   });
+  ipcMain.handle(IPC.agentMessageSend, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 20_000) throw new Error("Invalid agent message");
+    return controller.sendAgentMessage(structuredClone(value));
+  });
+  ipcMain.handle(IPC.agentMessageAcknowledge, (_event, messageId, agentId) => controller.acknowledgeAgentMessage(requireId(messageId, "message ID"), requireId(agentId, "agent ID")));
+  ipcMain.handle(IPC.agentMemoryPropose, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 40_000) throw new Error("Invalid agent memory");
+    return controller.proposeAgentMemory(structuredClone(value));
+  });
+  ipcMain.handle(IPC.agentMemoryReview, (_event, id, decision) => {
+    if (decision !== "reviewed" && decision !== "rejected") throw new Error("Invalid memory review decision");
+    return controller.reviewAgentMemory(requireId(id, "memory ID"), decision);
+  });
+  ipcMain.handle(IPC.agentRoutineCreate, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 256_000) throw new Error("Invalid agent routine");
+    return controller.createAgentRoutine(structuredClone(value));
+  });
+  ipcMain.handle(IPC.persistentAgentUpdate, (_event, agentId, action) => {
+    if (!new Set(["pin", "unpin", "hide", "archive", "restore", "delete"]).has(String(action))) throw new Error("Invalid persistent agent action");
+    return controller.updatePersistentAgent(requireId(agentId, "agent ID"), action);
+  });
+  ipcMain.handle(IPC.persistentAgentDuplicate, (_event, agentId, name) => {
+    if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{1,63}$/.test(name)) throw new Error("Invalid duplicate agent name");
+    return controller.duplicatePersistentAgent(requireId(agentId, "agent ID"), name);
+  });
   ipcMain.handle(IPC.computerEnabled, (_event, enabled) => {
     if (typeof enabled !== "boolean") throw new Error("Invalid computer access setting");
     return controller.setComputerAccessEnabled(enabled);

@@ -347,6 +347,8 @@ flowchart LR
 
 Capability and agent writes are atomic. The settings layer edits only direct supported configuration blocks and preserves unrelated Codex configuration. Built-in agents cannot be overwritten or deleted; they can be duplicated into a user-owned definition.
 
+TOML files remain the portable role definition. The SQLite team runtime imports those roles and adds persistent harness session references, mailbox cursors, operator-reviewed memory, notification preferences, and versioned routines. Mailbox handoffs retain both ownership metadata and the receiving acknowledgement. Proposed memory is visible to the operator but is excluded from reviewed context until accepted. Routine occurrence keys are calculated in the configured timezone and persisted before task creation, preventing a restart or daylight-saving transition from enqueueing the same occurrence twice.
+
 ## Persistence model
 
 ```mermaid

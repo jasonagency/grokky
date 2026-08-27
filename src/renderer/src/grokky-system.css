@@ -997,6 +997,29 @@ summary:focus-visible,
 .eval-deltas strong, .eval-deltas small { display: block; }
 .eval-deltas small { color: var(--muted); }
 @media (max-width: 900px) { .trace-filters, .eval-deltas { grid-template-columns: repeat(2, 1fr); } .replay-mode-grid { grid-template-columns: 1fr; } }
+.agent-workspace { border: 1px solid color-mix(in srgb, var(--signal, #b7ff5f) 20%, var(--border)); border-radius: 12px; padding: 16px; background: color-mix(in srgb, var(--panel) 94%, transparent); }
+.agent-workspace > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.agent-workspace > header span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.agent-workspace h4 { margin: 3px 0; }
+.agent-workspace > header p { margin: 0; color: var(--muted); }
+.agent-workspace > header em { color: var(--signal, #b7ff5f); font-size: 11px; font-style: normal; }
+.persistent-agent-tabs { display: flex; gap: 6px; overflow-x: auto; margin: 14px 0; }
+.agent-lifecycle-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.agent-lifecycle-controls button { border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--muted); padding: 5px 8px; }
+.persistent-agent-tabs button, .team-subpanel button, .routine-create button { border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); padding: 6px 9px; }
+.persistent-agent-tabs button[aria-selected="true"] { border-color: var(--signal, #b7ff5f); }
+.agent-workspace-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.team-subpanel { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.team-subpanel > header, .team-subpanel article { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.team-subpanel > header { margin-bottom: 8px; }
+.team-subpanel small, .team-subpanel > p { color: var(--muted); }
+.team-subpanel article { border-top: 1px solid var(--border); padding: 9px 0; }
+.team-subpanel article p { margin: 4px 0; }
+.mailbox-list, .routine-list { display: grid; }
+.memory-actions { display: flex; gap: 5px; }
+.routine-create { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; margin-top: 10px; }
+.routine-create input { min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--field, var(--panel)); color: var(--text); padding: 7px; }
+@media (max-width: 900px) { .agent-workspace-grid { grid-template-columns: 1fr; } }
 
 /* Work log and multi-agent orchestration */
 .activity-panel,

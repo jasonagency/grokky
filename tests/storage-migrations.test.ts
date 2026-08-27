@@ -18,7 +18,7 @@ describe("storage migrations", () => {
     await reopened.initialize();
 
     expect(await reopened.readSnapshot()).toBe('{"version":2,"preserved":true}');
-    expect((await reopened.inspect()).appliedMigrations).toEqual([1, 2, 3, 4, 5, 6]);
+    expect((await reopened.inspect()).appliedMigrations).toEqual([1, 2, 3, 4, 5, 6, 7]);
     await reopened.close();
   });
 

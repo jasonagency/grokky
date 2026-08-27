@@ -67,6 +67,72 @@ export interface AgentDraft {
   sandboxMode?: SandboxMode;
 }
 
+export type PersistentAgentStatus = "active" | "hidden" | "archived" | "deleted";
+
+export interface PersistentAgentRuntime {
+  id: string;
+  profile: AgentDefinition;
+  profileHash: string;
+  status: PersistentAgentStatus;
+  pinned: boolean;
+  harnessPreference?: string;
+  sessionReferences: Record<string, string>;
+  mailboxCursor?: string;
+  notificationPolicy: "all" | "attention" | "none";
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentMailboxMessage {
+  id: string;
+  threadId: string;
+  senderId: string;
+  receiverIds: string[];
+  taskId?: string;
+  kind: "direct" | "group" | "handoff";
+  content: string;
+  acknowledgedBy: string[];
+  handoff?: { fromAgentId: string; toAgentId: string; acceptedAt?: number };
+  createdAt: number;
+}
+
+export interface AgentMemory {
+  id: string;
+  agentId: string;
+  kind: "fact" | "preference" | "summary";
+  content: string;
+  sourceReferences: string[];
+  reviewStatus: "proposed" | "reviewed" | "rejected";
+  createdAt: number;
+  reviewedAt?: number;
+}
+
+export interface AgentRoutine {
+  id: string;
+  ownerAgentId: string;
+  name: string;
+  version: number;
+  template: TaskGoalDraft;
+  schedule: { localTime: string; timeZone: string; daysOfWeek?: number[] };
+  targetHostId: string;
+  policyId?: string;
+  budgetUsd: number;
+  approvalBoundary: "always" | "external-side-effects" | "never";
+  active: boolean;
+  nextFireAt: number;
+  lastOccurrenceKey?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TeamStateSnapshot {
+  revision: number;
+  agents: PersistentAgentRuntime[];
+  messages: AgentMailboxMessage[];
+  memories: AgentMemory[];
+  routines: AgentRoutine[];
+}
+
 export interface AgentRun {
   id: string;
   operationId: string;
@@ -271,6 +337,7 @@ export interface AppSnapshot {
   taskGraph: TaskGraphSnapshot;
   workspaceState?: WorkspaceStateSnapshot;
   controlRuntime?: ControlRuntimeSnapshot;
+  team?: TeamStateSnapshot;
   appVersion: string;
 }
 
@@ -310,6 +377,13 @@ export interface GrokkyApi {
   createAgent(draft: AgentDraft): Promise<AgentDefinition[]>;
   updateAgent(id: string, draft: AgentDraft): Promise<AgentDefinition[]>;
   deleteAgent(id: string): Promise<AgentDefinition[]>;
+  sendAgentMessage(input: Omit<AgentMailboxMessage, "id" | "acknowledgedBy" | "createdAt">): Promise<AgentMailboxMessage>;
+  acknowledgeAgentMessage(messageId: string, agentId: string): Promise<AgentMailboxMessage>;
+  proposeAgentMemory(input: Pick<AgentMemory, "agentId" | "kind" | "content" | "sourceReferences">): Promise<AgentMemory>;
+  reviewAgentMemory(id: string, decision: "reviewed" | "rejected"): Promise<AgentMemory>;
+  createAgentRoutine(input: Omit<AgentRoutine, "id" | "version" | "nextFireAt" | "lastOccurrenceKey" | "createdAt" | "updatedAt">): Promise<AgentRoutine>;
+  updatePersistentAgent(agentId: string, action: "pin" | "unpin" | "hide" | "archive" | "restore" | "delete"): Promise<TeamStateSnapshot>;
+  duplicatePersistentAgent(agentId: string, name: string): Promise<TeamStateSnapshot>;
   setComputerAccessEnabled(enabled: boolean): Promise<void>;
   setComputerCapability(id: ComputerCapabilityId, level: ComputerAccessLevel): Promise<void>;
   requestComputerPermission(id: ComputerCapabilityId): Promise<void>;
@@ -361,6 +435,13 @@ export const IPC = {
   agentCreate: "grokky:agents:create",
   agentUpdate: "grokky:agents:update",
   agentDelete: "grokky:agents:delete",
+  agentMessageSend: "grokky:team:message-send",
+  agentMessageAcknowledge: "grokky:team:message-acknowledge",
+  agentMemoryPropose: "grokky:team:memory-propose",
+  agentMemoryReview: "grokky:team:memory-review",
+  agentRoutineCreate: "grokky:team:routine-create",
+  persistentAgentUpdate: "grokky:team:agent-update",
+  persistentAgentDuplicate: "grokky:team:agent-duplicate",
   computerEnabled: "grokky:computer:enabled",
   computerCapability: "grokky:computer:capability",
   computerPermission: "grokky:computer:permission",

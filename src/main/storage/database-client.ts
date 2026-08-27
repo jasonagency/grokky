@@ -150,6 +150,28 @@ export class StorageDatabase {
     });
   }
 
+  readTeamState(): string | null {
+    const row = this.database.prepare("SELECT payload FROM team_state WHERE id = 1").get() as { payload?: unknown } | undefined;
+    return typeof row?.payload === "string" ? row.payload : null;
+  }
+
+  writeTeamState(snapshot: string): void {
+    const value = JSON.parse(snapshot) as import("../../shared/contracts").TeamStateSnapshot;
+    if (!Number.isInteger(value.revision) || !Array.isArray(value.agents) || !Array.isArray(value.messages) || !Array.isArray(value.memories) || !Array.isArray(value.routines)) throw new Error("Invalid team state snapshot");
+    this.transaction(() => {
+      this.database.prepare(`INSERT INTO team_state(id, revision, payload, updated_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, payload = excluded.payload, updated_at = excluded.updated_at`).run(value.revision, snapshot, Date.now());
+      this.database.exec("DELETE FROM agent_mailbox; DELETE FROM agent_memories; DELETE FROM agent_routines; DELETE FROM agent_runtimes;");
+      const agent = this.database.prepare("INSERT INTO agent_runtimes(id, status, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");
+      for (const item of value.agents) agent.run(item.id, item.status, JSON.stringify(item), item.createdAt, item.updatedAt);
+      const message = this.database.prepare("INSERT INTO agent_mailbox(id, thread_id, task_id, payload, created_at) VALUES (?, ?, ?, ?, ?)");
+      for (const item of value.messages) message.run(item.id, item.threadId, item.taskId ?? null, JSON.stringify(item), item.createdAt);
+      const memory = this.database.prepare("INSERT INTO agent_memories(id, agent_id, review_status, payload, created_at) VALUES (?, ?, ?, ?, ?)");
+      for (const item of value.memories) memory.run(item.id, item.agentId, item.reviewStatus, JSON.stringify(item), item.createdAt);
+      const routine = this.database.prepare("INSERT INTO agent_routines(id, owner_agent_id, active, next_fire_at, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const item of value.routines) routine.run(item.id, item.ownerAgentId, item.active ? 1 : 0, item.nextFireAt, JSON.stringify(item), item.createdAt, item.updatedAt);
+    });
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): boolean {
     return this.transaction(() => {
       const marker = this.database.prepare("SELECT value FROM metadata WHERE key = ?").get("legacy_import_v2");
@@ -380,6 +402,14 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
     return this.enqueue(() => this.requireDatabase().writeQualityState(snapshot));
   }
 
+  readTeamState(): Promise<string | null> {
+    return this.enqueue(() => this.requireDatabase().readTeamState());
+  }
+
+  writeTeamState(snapshot: string): Promise<void> {
+    return this.enqueue(() => this.requireDatabase().writeTeamState(snapshot));
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
   }
@@ -489,6 +519,14 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 
   writeQualityState(snapshot: string): Promise<void> {
     return this.request({ type: "write_quality_state", snapshot }).then(() => undefined);
+  }
+
+  readTeamState(): Promise<string | null> {
+    return this.request({ type: "read_team_state" });
+  }
+
+  writeTeamState(snapshot: string): Promise<void> {
+    return this.request({ type: "write_team_state", snapshot }).then(() => undefined);
   }
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {

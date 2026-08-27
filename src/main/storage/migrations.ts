@@ -308,6 +308,25 @@ const migrations: Migration[] = [{
       CREATE INDEX eval_runs_case_order ON eval_runs(case_id, case_version, created_at);
     `);
   },
+}, {
+  version: 7,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE team_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+      CREATE TABLE agent_runtimes (id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL) STRICT;
+      CREATE TABLE agent_mailbox (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, task_id TEXT, payload TEXT NOT NULL, created_at INTEGER NOT NULL) STRICT;
+      CREATE TABLE agent_memories (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, review_status TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL) STRICT;
+      CREATE TABLE agent_routines (id TEXT PRIMARY KEY, owner_agent_id TEXT NOT NULL, active INTEGER NOT NULL CHECK (active IN (0, 1)), next_fire_at INTEGER NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL) STRICT;
+      CREATE INDEX agent_mailbox_thread_order ON agent_mailbox(thread_id, created_at);
+      CREATE INDEX agent_memories_agent_order ON agent_memories(agent_id, created_at);
+      CREATE INDEX agent_routines_due ON agent_routines(active, next_fire_at);
+    `);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {
