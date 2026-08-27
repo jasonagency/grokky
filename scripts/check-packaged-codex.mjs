@@ -7,7 +7,7 @@ const [platform, arch] = process.argv.slice(2);
 const requireSigned = process.env.GROKKY_REQUIRE_SIGNED === "1";
 const platformConfig = platform === "darwin" && arch === "arm64"
   ? {
-      resources: join(process.cwd(), "release", "mac-arm64", "Grokky.app", "Contents", "Resources"),
+      resources: join(process.cwd(), "release", "mac-arm64", "PuckBot.app", "Contents", "Resources"),
       packageName: "codex-darwin-arm64",
       vendorPlatform: "aarch64-apple-darwin",
       executable: "codex",
@@ -68,7 +68,7 @@ async function verifySignedPackage() {
   const releaseDirectory = join(process.cwd(), "release");
   const files = await readdir(releaseDirectory);
   if (platform === "darwin") {
-    const appPath = join(releaseDirectory, "mac-arm64", "Grokky.app");
+    const appPath = join(releaseDirectory, "mac-arm64", "PuckBot.app");
     const dmg = files.find((name) => name.endsWith(".dmg"));
     if (!dmg) throw new Error("Signed macOS release has no DMG");
     await run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);

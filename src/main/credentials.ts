@@ -33,9 +33,11 @@ export function parseEnvValue(source: string, key: string): string | undefined {
 
 export function defaultOpenRouterCredentialCandidates(homeDirectory: string): string[] {
   return [
+    process.env.PUCKBOT_OPENROUTER_ENV_FILE ?? "",
     process.env.GROKKY_OPENROUTER_ENV_FILE ?? "",
+    join(homeDirectory, ".config", "puckbot", ".env"),
     join(homeDirectory, ".config", "grokky", ".env"),
-  ].filter(Boolean);
+  ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index);
 }
 
 export async function resolveOpenRouterCredential(

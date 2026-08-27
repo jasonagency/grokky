@@ -1,4 +1,4 @@
-/* Grokky instrument system
+/* PuckBot instrument system
  *
  * The outer application frame stays soft and tactile. Everything inside uses
  * rails, indexed rows, cut corners, quiet gradients, and explicit state marks
@@ -2093,7 +2093,7 @@ button.settings-row:hover::before {
 
 /* Quiet finishing pass
  *
- * Keep Grokky's instrument language where it communicates state, but remove
+ * Keep PuckBot's instrument language where it communicates state, but remove
  * decorative telemetry from everyday navigation and settings. Operational
  * surfaces should read like a calm product, not a debug console.
  */

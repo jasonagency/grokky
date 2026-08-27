@@ -88,7 +88,7 @@ describe("Codex App Server adapter", () => {
     expect(client.requests.filter((entry) => entry.method === "turn/interrupt")).toHaveLength(1);
   });
 
-  test("redacts approval arguments and applies Grokky policy", async () => {
+  test("redacts approval arguments and applies PuckBot policy", async () => {
     const client = new FakeClient();
     const events: ProviderEvent[] = [];
     const running = new CodexAppServerAdapter(async () => client, fallback).run(context(events));

@@ -105,7 +105,7 @@ export function orchestrationFromRolloutRecord(
       operationId,
       tool: "spawn_agent",
       senderThreadId: rootThreadId,
-      senderName: "Grokky lead",
+      senderName: "PuckBot lead",
       receiverThreads: [{ threadId, name, status: "running" }],
       prompt: task,
       status: "running",
@@ -123,7 +123,7 @@ export function orchestrationFromRolloutRecord(
       operationId: messageId,
       tool: "wait",
       senderThreadId: rootThreadId,
-      senderName: "Grokky lead",
+      senderName: "PuckBot lead",
       receiverThreads: [{ threadId: thread.threadId, name: thread.name, status: "completed", message: result }],
       status: "completed",
     }];

@@ -6,8 +6,8 @@ import { createPiResourceLoader } from "../src/main/harnesses/pi-resources";
 import { createPiTools } from "../src/main/harnesses/pi-tools";
 import { piContext } from "./fixtures/pi-fixtures";
 
-describe("Pi Grokky tools", () => {
-  test("exposes no Pi built-ins and sends writes through Grokky access", async () => {
+describe("Pi PuckBot tools", () => {
+  test("exposes no Pi built-ins and sends writes through PuckBot access", async () => {
     const context = piContext();
     context.computerAccess.enabled = true;
     context.computerAccess.grants.files = "allow";
@@ -40,13 +40,13 @@ describe("Pi Grokky tools", () => {
     expect(loader.getExtensions().extensions).toEqual([]);
   });
 
-  test("loads only skills explicitly selected by Grokky", async () => {
+  test("loads only skills explicitly selected by PuckBot", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "grokky-pi-skills-"));
     const selectedDirectory = join(cwd, "selected");
     const unselectedDirectory = join(cwd, "unselected");
     await Promise.all([mkdir(selectedDirectory, { recursive: true }), mkdir(unselectedDirectory, { recursive: true })]);
     await Promise.all([
-      writeFile(join(selectedDirectory, "SKILL.md"), "---\nname: selected\ndescription: Selected by Grokky\n---\nUse the selected skill.\n"),
+      writeFile(join(selectedDirectory, "SKILL.md"), "---\nname: selected\ndescription: Selected by PuckBot\n---\nUse the selected skill.\n"),
       writeFile(join(unselectedDirectory, "SKILL.md"), "---\nname: unselected\ndescription: Not selected\n---\nDo not load this skill.\n"),
     ]);
     const loader = await createPiResourceLoader({

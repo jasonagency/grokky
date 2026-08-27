@@ -44,7 +44,7 @@ export class WorktreeManager {
     if (!isPathWithin(repositoryRoot, pathname)) throw new Error("Invalid worktree path");
     await mkdir(repositoryRoot, { recursive: true });
     await repository.git(["worktree", "add", "-b", branch, "--", pathname, baseCommit]);
-    await repository.git(["worktree", "lock", "--reason", "Grokky workspace lease", pathname]);
+    await repository.git(["worktree", "lock", "--reason", "PuckBot workspace lease", pathname]);
     return { path: pathname, branch, baseCommit };
   }
 }

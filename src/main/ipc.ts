@@ -34,7 +34,7 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.runCancel, (_event, conversationId) => controller.cancelRun(requireId(conversationId, "conversation ID")));
   ipcMain.handle(IPC.directoryChoose, async (_event, conversationId) => {
     const id = requireId(conversationId, "conversation ID");
-    const result = await dialog.showOpenDialog({ title: "Choose Grokky workspace", properties: ["openDirectory", "createDirectory"] });
+    const result = await dialog.showOpenDialog({ title: "Choose PuckBot workspace", properties: ["openDirectory", "createDirectory"] });
     const pathname = result.canceled ? null : result.filePaths[0] ?? null;
     if (pathname) await controller.updateConversation(id, { workingDirectory: pathname });
     return pathname;

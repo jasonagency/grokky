@@ -252,7 +252,7 @@ function activityForCall(call: ChatToolCall, status: ActivityItem["status"], det
 
 function baseSystem(conversation: Conversation, readOnly: boolean, webSearchEnabled: boolean): string[] {
   return [
-    "You are Grokky, a careful local workspace agent.",
+    "You are PuckBot, a careful local workspace agent.",
     `The selected workspace is ${conversation.workingDirectory}.`,
     "Use tools when repository evidence is needed. Never request, read, expose, or infer credentials or private keys.",
     "Only claim to have read, browsed, seen, clicked, typed, or opened something when the matching tool completed successfully.",
@@ -331,7 +331,7 @@ async function researchWeb(
         headers: {
           Authorization: `Bearer ${context.apiKey}`,
           "Content-Type": "application/json",
-          "X-Title": "Grokky",
+          "X-Title": "PuckBot",
         },
         body: JSON.stringify({
           model: OPENROUTER_WEB_RESEARCH_MODEL,
@@ -339,7 +339,7 @@ async function researchWeb(
             {
               role: "system",
               content: [
-                "You are Grokky's web research step. You must use the provided live web search tool before answering. Prefer first-party sources and never invent URLs.",
+                "You are PuckBot's web research step. You must use the provided live web search tool before answering. Prefer first-party sources and never invent URLs.",
                 PRODUCT_WRITING_STYLE_RULE,
               ].join("\n"),
             },
@@ -516,7 +516,7 @@ async function runCrewMember(
       operationId,
       tool: "spawn_agent",
       senderThreadId: context.conversation.id,
-      senderName: "Grokky lead",
+      senderName: "PuckBot lead",
       receiverThreads: [{ threadId, name: agent.name, status: "running" }],
       prompt,
       status: "completed",
@@ -543,7 +543,7 @@ async function runCrewMember(
         operationId: `wait:${threadId}`,
         tool: "wait",
         senderThreadId: context.conversation.id,
-        senderName: "Grokky lead",
+        senderName: "PuckBot lead",
         receiverThreads: [{ threadId, name: agent.name, status: "completed", message: result.text }],
         status: "completed",
       },
@@ -557,7 +557,7 @@ async function runCrewMember(
         operationId: `wait:${threadId}`,
         tool: "wait",
         senderThreadId: context.conversation.id,
-        senderName: "Grokky lead",
+        senderName: "PuckBot lead",
         receiverThreads: [{ threadId, name: agent.name, status: "failed", message }],
         status: "failed",
       },
@@ -569,7 +569,7 @@ async function runCrewMember(
 export async function runOpenRouter(context: OpenRouterRunContext): Promise<void> {
   const client = new OpenRouter({
     apiKey: context.apiKey,
-    appTitle: "Grokky",
+    appTitle: "PuckBot",
     appCategories: "desktop-agent,local-agent",
     timeoutMs: 180_000,
   });
@@ -596,7 +596,7 @@ export async function runOpenRouter(context: OpenRouterRunContext): Promise<void
   );
   const findings = results.length
     ? [
-        "Read-only Grokky crew findings follow. Verify them, resolve disagreements, and own all final decisions and file changes.",
+        "Read-only PuckBot crew findings follow. Verify them, resolve disagreements, and own all final decisions and file changes.",
         ...results.map((result) => `\n[${result.agent.name}]\n${result.text}`),
       ].join("\n")
     : "";

@@ -1,6 +1,6 @@
-# Contributing to Grokky
+# Contributing to PuckBot
 
-Grokky is a private Early AI Dopters project. Repository access does not grant redistribution rights.
+PuckBot is a private Early AI Dopters project. Repository access does not grant redistribution rights.
 
 ## Before changing code
 

@@ -132,7 +132,7 @@ const MAX_AGENT_CHOICES: Array<SelectChoice<number>> = Array.from({ length: 8 },
 }));
 const THEME_CHOICES: Array<SelectChoice<AppSnapshot["settings"]["theme"]>> = [
   { value: "system", label: "Follow system", detail: "Match your operating system automatically" },
-  { value: "dark", label: "Dark", detail: "Grokky's cinematic workspace" },
+  { value: "dark", label: "Dark", detail: "PuckBot's cinematic workspace" },
   { value: "light", label: "Light", detail: "Bright, high-contrast workspace" },
 ];
 const UPDATE_CHANNEL_CHOICES: Array<SelectChoice<UpdateChannel>> = [
@@ -140,7 +140,7 @@ const UPDATE_CHANNEL_CHOICES: Array<SelectChoice<UpdateChannel>> = [
   { value: "beta", label: "Beta", detail: "Signed prereleases for early testing" },
 ];
 const SIGNAL_PALETTES: Array<{ id: AccentPalette; label: string; detail: string }> = [
-  { id: "lime", label: "Acid lime", detail: "Original Grokky signal" },
+  { id: "lime", label: "Acid lime", detail: "Original PuckBot signal" },
   { id: "electric-blue", label: "Electric blue", detail: "Blue current on black" },
   { id: "ultraviolet", label: "Ultraviolet", detail: "Cool violet instrument light" },
   { id: "solar-amber", label: "Solar amber", detail: "Warm high-visibility glow" },
@@ -221,7 +221,7 @@ const AGENT_ICONS: Array<{ id: AgentIcon; label: string }> = [
   { id: "mint", label: "Mint" },
 ];
 
-function BrandMark({ size = "md", label = "Grokky" }: { size?: "sm" | "md"; label?: string }) {
+function BrandMark({ size = "md", label = "PuckBot" }: { size?: "sm" | "md"; label?: string }) {
   return (
     <span className={`brand-mark brand-mark-${size}`} role="img" aria-label={label}>
       <img src="./mascots/grokky-hero.png" alt="" draggable={false} />
@@ -401,14 +401,14 @@ function MessageList({ conversation, agents }: { conversation: Conversation; age
       <div className="message-stack">
         {!conversation.messages.length ? (
           <div className="empty-session">
-            <div className="bot-stage" aria-label="Grokky bot crew">
+            <div className="bot-stage" aria-label="PuckBot bot crew">
               <div className="bot-stage-halo" />
               <BotMascot mood="thinking" variant="cyan" size="md" label="Explorer bot" className="stage-bot stage-bot-left" />
-              <BotMascot mood="idle" variant="lime" size="lg" label="Lead Grokky bot" className="stage-bot stage-bot-center" />
+              <BotMascot mood="idle" variant="lime" size="lg" label="Lead PuckBot bot" className="stage-bot stage-bot-center" />
               <BotMascot mood="working" variant="coral" size="md" label="Builder bot" className="stage-bot stage-bot-right" />
             </div>
             <div className="empty-copy">
-              <h1>What should Grokky build?</h1>
+              <h1>What should PuckBot build?</h1>
               <p>Choose a starting point or describe the outcome below.</p>
               <div className="starter-list">
                 {STARTERS.map((starter, index) => (
@@ -424,11 +424,11 @@ function MessageList({ conversation, agents }: { conversation: Conversation; age
         ) : (
           conversation.messages.map((message, index) => (
             <article className={`message ${message.role} ${message.role === "user" && index === latestUserIndex && crewVisible ? "with-crew" : ""}`} key={message.id}>
-              {message.role === "assistant" && <BotMascot mood="idle" identity={`conversation:${conversation.id}`} size="xs" className="message-avatar" label="Grokky" />}
+              {message.role === "assistant" && <BotMascot mood="idle" identity={`conversation:${conversation.id}`} size="xs" className="message-avatar" label="PuckBot" />}
               <div className="message-body">
                 <div className="message-shell">
                   <header>
-                    <span>{message.role === "user" ? "You" : "Grokky"}</span>
+                    <span>{message.role === "user" ? "You" : "PuckBot"}</span>
                     <time>{timeLabel(message.createdAt)}</time>
                   </header>
                   <div className="message-content"><MarkdownMessage content={message.content} /></div>
@@ -485,7 +485,7 @@ function CrewRunPanel({ conversation, agents }: { conversation: Conversation; ag
         ? { title: `${active.length} specialist${active.length === 1 ? "" : "s"} working`, detail: queued.length ? `${queued.length} queued for handoff` : reported.length ? `${reported.length} of ${runs.length} reports received` : "Independent work is live" }
         : { title: "Preparing the next specialist", detail: `${queued.length} queued for handoff` }
       : stage === "synthesizing"
-        ? { title: "Grokky is synthesizing", detail: `${reported.length} specialist ${reported.length === 1 ? "report" : "reports"} ready` }
+        ? { title: "PuckBot is synthesizing", detail: `${reported.length} specialist ${reported.length === 1 ? "report" : "reports"} ready` }
         : conversation.lastRunOutcome === "blocked" || conversation.lastRunOutcome === "failed"
           ? { title: "Crew needs attention", detail: failed.length ? `${reported.length} reported, ${failed.length} stopped` : `${reported.length} of ${runs.length} confirmed reports received` }
           : { title: "Crew run delivered", detail: `${reported.length} specialist ${reported.length === 1 ? "report" : "reports"} combined` };
@@ -565,7 +565,7 @@ function CrewRunPanel({ conversation, agents }: { conversation: Conversation; ag
                 <div className="crew-run-footer">
                   <div className="crew-lead-node stage-synthesizing">
                     <BotMascot mood="thinking" identity="grokky-lead" variant="lime" size="xs" />
-                    <span><strong>Grokky lead</strong><small>Resolving the specialist findings into one response</small></span>
+                    <span><strong>PuckBot lead</strong><small>Resolving the specialist findings into one response</small></span>
                     <em aria-live="polite"><Sparkle size={11} weight="fill" />Synthesizing</em>
                   </div>
                 </div>
@@ -607,7 +607,7 @@ function CrewMailbox({ id, labelledBy, communications, running }: { id: string; 
             const reportsOnly = group.entries.every((entry) => entry.kind === "report");
             return (
               <li key={`${group.senderThreadId}:${groupIndex}`} className="crew-message-group">
-                <BotMascot mood={failed ? "error" : reportsOnly ? "success" : "working"} identity={group.senderThreadId} variant={group.senderName === "Grokky lead" ? "lime" : undefined} size="xs" />
+                <BotMascot mood={failed ? "error" : reportsOnly ? "success" : "working"} identity={group.senderThreadId} variant={group.senderName === "PuckBot lead" ? "lime" : undefined} size="xs" />
                 <div className="crew-message-group-copy">
                   <header className="crew-message-group-header">
                     <strong>{group.senderName}</strong>
@@ -978,7 +978,7 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
 
   return (
     <div className="composer-wrap">
-      {conversation.status === "running" && !conversation.selectedAgentIds.length && <BotMascot mood={conversationMood(conversation)} identity={`conversation:${conversation.id}`} size="sm" className="composer-bot" label="Grokky is working" />}
+      {conversation.status === "running" && !conversation.selectedAgentIds.length && <BotMascot mood={conversationMood(conversation)} identity={`conversation:${conversation.id}`} size="sm" className="composer-bot" label="PuckBot is working" />}
       <div className={`composer ${conversation.status === "running" ? "is-running" : ""}`}>
         <textarea
           ref={textarea}
@@ -991,8 +991,8 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
             }
           }}
           rows={1}
-          placeholder={conversation.status === "running" ? "Grokky is working…" : "Message Grokky"}
-          aria-label="Message Grokky"
+          placeholder={conversation.status === "running" ? "PuckBot is working…" : "Message PuckBot"}
+          aria-label="Message PuckBot"
           disabled={conversation.status === "running"}
         />
         {conversation.status === "running" ? (
@@ -1381,12 +1381,12 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <div className="settings-dialog" role="dialog" aria-modal="true" aria-label="Grokky settings">
+      <div className="settings-dialog" role="dialog" aria-modal="true" aria-label="PuckBot settings">
         <nav className="settings-nav" aria-label="Settings sections">
-          <div className="settings-brand"><BrandMark size="sm" /><strong>Grokky</strong></div>
+          <div className="settings-brand"><BrandMark size="sm" /><strong>PuckBot</strong></div>
           <div className="settings-nav-intro">
             <strong>Control room</strong>
-            <span>Shape how Grokky works.</span>
+            <span>Shape how PuckBot works.</span>
           </div>
           <div className="settings-nav-groups">
             {navGroups.map((group) => (
@@ -1425,17 +1425,17 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                 </button>
                 <div className="settings-row path-setting">
                   <span className="settings-row-icon"><Monitor size={18} /></span>
-                  <span className="settings-copy"><strong>Appearance</strong><small>Choose how Grokky looks on this computer.</small></span>
+                  <span className="settings-copy"><strong>Appearance</strong><small>Choose how PuckBot looks on this computer.</small></span>
                   <SelectMenu value={snapshot.settings.theme} choices={THEME_CHOICES} label="Application appearance" onChange={(theme) => void patchSettings({ theme })} />
                 </div>
                 <SignalPalette value={snapshot.settings.accentPalette ?? "lime"} onChange={(accentPalette) => void patchSettings({ accentPalette })} />
                 <div className="settings-row">
-                  <span className="settings-copy"><strong>Update channel</strong><small>Grokky checks automatically. You choose when to download and restart.</small></span>
+                  <span className="settings-copy"><strong>Update channel</strong><small>PuckBot checks automatically. You choose when to download and restart.</small></span>
                   <SelectMenu value={snapshot.update?.channel ?? "stable"} choices={UPDATE_CHANNEL_CHOICES} label="Update channel" disabled={!snapshot.update} onChange={(channel) => void window.grokky.setUpdateChannel(channel).catch((error) => onError(error.message))} />
                   <button type="button" disabled={!snapshot.update} onClick={() => void window.grokky.checkForUpdate().catch((error) => onError(error.message))}>Check now</button>
                 </div>
                 <div className="settings-row">
-                  <span className="settings-copy"><strong>Workspace permission</strong><small>Control whether Grokky can edit files.</small></span>
+                  <span className="settings-copy"><strong>Workspace permission</strong><small>Control whether PuckBot can edit files.</small></span>
                   <SelectMenu value={conversation.sandboxMode} choices={SANDBOX_CHOICES} label="Workspace permission" disabled={conversation.status === "running"} onChange={(sandboxMode) => void patchConversation({ sandboxMode })} />
                 </div>
                 {activeHarness && (
@@ -1493,7 +1493,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                 </div>
 
                 <section className="computer-section">
-                  <div className="computer-section-heading"><div><h4>Connected computers</h4><p>Select where Grokky performs local work.</p></div><button type="button" onClick={() => setPairOpen((open) => !open)}><WifiHigh size={14} />Pair</button></div>
+                  <div className="computer-section-heading"><div><h4>Connected computers</h4><p>Select where PuckBot performs local work.</p></div><button type="button" onClick={() => setPairOpen((open) => !open)}><WifiHigh size={14} />Pair</button></div>
                   <div className="device-list">
                     {snapshot.computerAccess.devices.map((device) => (
                       <div className="device-row-shell" key={device.id}>
@@ -1514,7 +1514,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                   </div>
                   {pairOpen && (
                     <div className="pair-runner-form">
-                      <div><strong>Pair another computer</strong><small>Start Grokky Runner there, then enter its endpoint and six-digit code.</small></div>
+                      <div><strong>Pair another computer</strong><small>Start PuckBot Runner there, then enter its endpoint and six-digit code.</small></div>
                       <label><span>Runner endpoint</span><input value={runnerEndpoint} onChange={(event) => setRunnerEndpoint(event.target.value)} placeholder="http://100.x.x.x:4747" /></label>
                       <label><span>Pairing code</span><input value={pairingCode} onChange={(event) => setPairingCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder="000000" /></label>
                       <div className="pair-runner-actions"><button type="button" onClick={() => setPairOpen(false)}>Cancel</button><button className="primary" type="button" disabled={computerBusy === "pair" || pairingCode.length !== 6 || !runnerEndpoint.trim()} onClick={() => void pairRunner()}>{computerBusy === "pair" ? <InlineLoader label="Pairing computer" /> : <ShieldCheck size={14} />}Pair securely</button></div>
@@ -1591,7 +1591,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                 <div className="settings-stack agent-workbench">
                   <div className="agent-editor-header">
                     <button type="button" onClick={() => { setAgentDraft(null); setEditingAgentId(null); }}><ArrowLeft size={15} />Agents</button>
-                    <div><h3>{editingAgentId ? `Edit ${agentDraft.name}` : "Create an agent"}</h3><p>Give Grokky a reusable specialist with a clear job and boundary.</p></div>
+                    <div><h3>{editingAgentId ? `Edit ${agentDraft.name}` : "Create an agent"}</h3><p>Give PuckBot a reusable specialist with a clear job and boundary.</p></div>
                   </div>
                   <div className="agent-form">
                     <fieldset className="agent-icon-field">
@@ -1606,7 +1606,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                       </div>
                     </fieldset>
                     <label className="agent-field"><span>Name</span><input value={agentDraft.name} autoFocus onChange={(event) => setAgentDraft({ ...agentDraft, name: event.target.value })} placeholder="qa_scout" /></label>
-                    <label className="agent-field"><span>Description</span><input value={agentDraft.description} onChange={(event) => setAgentDraft({ ...agentDraft, description: event.target.value })} placeholder="When should Grokky choose this agent?" /></label>
+                    <label className="agent-field"><span>Description</span><input value={agentDraft.description} onChange={(event) => setAgentDraft({ ...agentDraft, description: event.target.value })} placeholder="When should PuckBot choose this agent?" /></label>
                     <label className="agent-field agent-instructions"><span>Instructions</span><textarea value={agentDraft.developerInstructions} onChange={(event) => setAgentDraft({ ...agentDraft, developerInstructions: event.target.value })} placeholder="Describe the role, method, constraints, and expected result." /></label>
                     <div className="agent-form-grid">
                       <div className="agent-field"><span>Scope</span><SelectMenu value={agentDraft.scope} choices={AGENT_SCOPE_CHOICES} label="Agent scope" disabled={Boolean(editingAgentId)} onChange={(scope) => setAgentDraft({ ...agentDraft, scope })} /></div>
@@ -1624,7 +1624,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                 </div>
               ) : (
                 <div className="settings-stack agent-workbench">
-                  <div className="capability-hero agent-hero"><BotMascot mood="working" identity="builder" size="lg" /><div><h3>Build a crew around the job</h3><p>Choose specialists per chat. Grokky shows their work live and brings their findings back to one lead.</p><button type="button" onClick={() => beginAgentDraft({ name: "", description: "", developerInstructions: "", scope: "personal", icon: "lime" })}><UserPlus size={15} />New agent</button></div></div>
+                  <div className="capability-hero agent-hero"><BotMascot mood="working" identity="builder" size="lg" /><div><h3>Build a crew around the job</h3><p>Choose specialists per chat. PuckBot shows their work live and brings their findings back to one lead.</p><button type="button" onClick={() => beginAgentDraft({ name: "", description: "", developerInstructions: "", scope: "personal", icon: "lime" })}><UserPlus size={15} />New agent</button></div></div>
                   <div className="settings-row">
                     <span className="settings-copy"><strong>Multi-agent orchestration</strong><small>Use native Codex subagents or parallel OpenRouter scouts.</small></span>
                     <Switch checked={snapshot.settings.multiAgentEnabled} label="Multi-agent orchestration" onChange={(checked) => void patchSettings({ multiAgentEnabled: checked })} />
@@ -1664,7 +1664,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
 
             {tab === "mcp" && (
               <div className="settings-stack capability-stack">
-                <div className="settings-intro"><h3>Configured MCP servers</h3><p>Grokky inherits the same local Codex MCP configuration. Opening this view connects enabled servers in the main process to discover their current tool catalogs.</p></div>
+                <div className="settings-intro"><h3>Configured MCP servers</h3><p>PuckBot inherits the same local Codex MCP configuration. Opening this view connects enabled servers in the main process to discover their current tool catalogs.</p></div>
                 {!capabilities ? <div className="capability-loading"><InlineLoader label="Loading servers" /><span>Loading servers</span></div> : (
                   <div className="capability-list">
                     {capabilities.mcpServers.map((server) => (
@@ -1685,13 +1685,13 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                     {!capabilities.mcpServers.length && <div className="capability-empty">No MCP servers are configured.</div>}
                   </div>
                 )}
-                <p className="settings-note">OpenRouter receives only namespaced tools allowed by Grokky policy. Unannotated tools default to external side effect; read-only specialists receive read-classified tools only.</p>
+                <p className="settings-note">OpenRouter receives only namespaced tools allowed by PuckBot policy. Unannotated tools default to external side effect; read-only specialists receive read-classified tools only.</p>
               </div>
             )}
 
             {tab === "connectors" && (
               <div className="settings-stack capability-stack">
-                <div className="settings-intro"><h3>Plugins and connectors</h3><p>Use installed Codex plugins and their bundled tools inside Grokky.</p></div>
+                <div className="settings-intro"><h3>Plugins and connectors</h3><p>Use installed Codex plugins and their bundled tools inside PuckBot.</p></div>
                 <div className="settings-row">
                   <span className="settings-copy"><strong>Connector runtime</strong><small>Enable plugins, remote tools, and network-backed connectors for Codex.</small></span>
                   <Switch checked={snapshot.settings.connectorsEnabled} label="Connector runtime" onChange={(checked) => void patchSettings({ connectorsEnabled: checked })} />
@@ -1708,7 +1708,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                     {!capabilities.connectors.length && <div className="capability-empty">No connector plugins are installed.</div>}
                   </div>
                 )}
-                <p className="settings-note">This applies to Codex sessions. OpenRouter uses Grokky's built-in workspace tools.</p>
+                <p className="settings-note">This applies to Codex sessions. OpenRouter uses PuckBot's built-in workspace tools.</p>
               </div>
             )}
           </div>
@@ -1770,7 +1770,7 @@ function ComputerApprovalDialog({ request, busy, onDecision }: {
         <div className="computer-approval-bot"><BotMascot mood="thinking" identity={`approval:${request.capability}`} size="md" /></div>
         <div className="computer-approval-copy">
           <span>Computer permission</span>
-          <h2 id="computer-approval-title">Grokky wants to use {request.deviceName}</h2>
+          <h2 id="computer-approval-title">PuckBot wants to use {request.deviceName}</h2>
           <p id="computer-approval-description">Approve <strong>{request.action}</strong> for <code>{request.target}</code>.</p>
           <small>{request.capability} access · this action is recorded in the local activity log</small>
         </div>
@@ -1835,7 +1835,7 @@ export function App() {
   const filtered = useMemo(() => snapshot?.conversations.filter((item) => item.title.toLowerCase().includes(search.toLowerCase())) ?? [], [snapshot?.conversations, search]);
 
   if (!snapshot || !active) {
-    return <div className="loading-screen"><span className="loading-halo" /><BotMascot mood="thinking" size="lg" label="Grokky is waking up" /><strong>Waking Grokky</strong><InlineLoader label="Loading workspace" /></div>;
+    return <div className="loading-screen"><span className="loading-halo" /><BotMascot mood="thinking" size="lg" label="PuckBot is waking up" /><strong>Waking PuckBot</strong><InlineLoader label="Loading workspace" /></div>;
   }
 
   async function updateProvider(provider: ProviderId) {
@@ -1888,7 +1888,7 @@ export function App() {
         <div className="window-drag" />
         <div className="brand-row">
           <BrandMark />
-          <div><strong>Grokky</strong><span>Local agent workspace</span></div>
+          <div><strong>PuckBot</strong><span>Local agent workspace</span></div>
           <button className="icon-button new-session" type="button" title="New session" onClick={() => void window.grokky.createConversation()}><Plus size={18} /></button>
         </div>
         <label className="search-box">

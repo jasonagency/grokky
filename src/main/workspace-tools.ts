@@ -119,7 +119,7 @@ function matchesCommandPrefix(command: string, prefix: string): boolean {
 async function runAllowedCommand(root: string, command: string): Promise<string> {
   const trimmed = command.trim();
   if (!commandPrefixes.some((prefix) => matchesCommandPrefix(trimmed, prefix))) {
-    throw new Error("Command is outside Grokky's allowlist");
+    throw new Error("Command is outside PuckBot's allowlist");
   }
   if (unsafeCommandText.test(trimmed)) throw new Error("Shell operators, network commands, deletion, and system control are blocked");
   if (trimmed === "pwd") return resolve(root);

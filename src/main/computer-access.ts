@@ -40,7 +40,7 @@ const capabilityCopy: Record<ComputerCapabilityId, Pick<ComputerCapability, "lab
   browser: { label: "Browser and web pages", description: "Open approved public web pages and return readable page content." },
   screen: { label: "Screen visibility", description: "Capture the current display so an agent can inspect visible application state." },
   automation: { label: "Application control", description: "Open apps, click coordinates, and type text through supported system accessibility controls." },
-  mcp: { label: "MCP tools", description: "Call enabled Model Context Protocol tools through Grokky's policy and audit gateway." },
+  mcp: { label: "MCP tools", description: "Call enabled Model Context Protocol tools through PuckBot's policy and audit gateway." },
 };
 
 const localCapabilities: ComputerCapabilityId[] = ["files", "commands", "browser", "screen", "automation", "mcp"];
@@ -135,7 +135,7 @@ async function browseUrl(value: string, allowlist: string[], approvedTarget: boo
     const response = await fetch(url, {
       redirect: "follow",
       signal: controller.signal,
-      headers: { "User-Agent": "GrokkyRunner/0.1 (+local computer tool)" },
+      headers: { "User-Agent": "PuckBotRunner/0.1 (+local computer tool)" },
     });
     const finalUrl = new URL(response.url);
     await assertPublicUrl(finalUrl);

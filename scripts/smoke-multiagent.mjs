@@ -18,7 +18,7 @@ async function rolloutRecords(threadId) {
 }
 
 const workspace = await mkdtemp(join(tmpdir(), "grokky-agents-smoke-"));
-await writeFile(join(workspace, "README.md"), "# Grokky agents smoke workspace\n");
+await writeFile(join(workspace, "README.md"), "# PuckBot agents smoke workspace\n");
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 180_000);
 

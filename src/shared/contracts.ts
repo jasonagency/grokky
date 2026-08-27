@@ -384,7 +384,7 @@ export interface ConversationPatch {
   selectedAgentIds?: string[];
 }
 
-export interface GrokkyApi {
+export interface PuckBotApi {
   getSnapshot(): Promise<AppSnapshot>;
   createConversation(): Promise<string>;
   setActiveConversation(conversationId: string): Promise<void>;

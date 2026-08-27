@@ -12,11 +12,11 @@ interface UpdateBannerProps {
 
 function updateTitle(update: UpdateSnapshot): string {
   switch (update.status) {
-    case "available": return `Grokky ${update.info?.version} is available`;
-    case "downloading": return `Downloading Grokky ${update.info?.version ?? "update"}`;
-    case "downloaded": return `Grokky ${update.info?.version} is ready`;
+    case "available": return `PuckBot ${update.info?.version} is available`;
+    case "downloading": return `Downloading PuckBot ${update.info?.version ?? "update"}`;
+    case "downloaded": return `PuckBot ${update.info?.version} is ready`;
     case "blocked": return "Update is ready when work reaches a safe checkpoint";
-    default: return "Grokky could not verify the update";
+    default: return "PuckBot could not verify the update";
   }
 }
 

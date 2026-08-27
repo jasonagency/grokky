@@ -318,10 +318,10 @@ export class MainController {
         const sessionId = this.taskSessions.get(taskId);
         await this.harnessRegistry.deliverControl(task.assignment.harnessId, { type: "cancel", ...(sessionId ? { sessionId } : {}) }).catch(() => ({ accepted: false }));
       }
-      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Canceled and fenced by the Grokky scheduler" }));
+      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Canceled and fenced by the PuckBot scheduler" }));
     } else if (localAction && (!activeLease || request.type === "reprioritize")) {
       await this.taskScheduler.applyAction(taskId, localAction);
-      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Applied by the Grokky scheduler" }));
+      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Applied by the PuckBot scheduler" }));
     } else if (task.assignment.harnessId) {
       const control: HarnessControl | null = request.type === "stop" ? { type: "cancel" }
         : request.type === "redirect" && request.message ? { type: "steer", message: request.message }
@@ -562,7 +562,7 @@ export class MainController {
     if (conversation.status === "running") throw new Error("This conversation is already running");
     await requireDirectory(conversation.workingDirectory);
     if (conversation.projectMode === "none" && requiresProjectDirectory(text)) {
-      throw new Error("Choose a project folder before Grokky starts this work. Use the project menu below the message box, then choose or create a folder.");
+      throw new Error("Choose a project folder before PuckBot starts this work. Use the project menu below the message box, then choose or create a folder.");
     }
     if (requiresDevelopmentCommands(text) && !conversation.allowCommands) {
       throw new Error("This request needs local development commands. Choose Full access below the message box before sending it.");
@@ -1142,7 +1142,7 @@ export class MainController {
       const prompt = [
         claim.task.description || claim.task.title,
         claim.checkpoint ? `Resume from checkpoint: ${claim.checkpoint.cursor}` : "",
-        workspaceLease.kind === "git" && workspaceLease.writable ? "Work only in the assigned isolated worktree. Grokky will checkpoint completed changes into its task branch." : "",
+        workspaceLease.kind === "git" && workspaceLease.writable ? "Work only in the assigned isolated worktree. PuckBot will checkpoint completed changes into its task branch." : "",
       ].filter(Boolean).join("\n\n");
       await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
       await this.recordTaskEvent(claim, "run.started", { prompt, workspaceLeaseId: workspaceLease.id, harnessId });
@@ -1382,7 +1382,7 @@ export class MainController {
     if (!await repository.status(lease.root)) return undefined;
     await repository.git(["add", "--all", "--"], { cwd: lease.root });
     await repository.git([
-      "-c", "user.name=Grokky Agent",
+      "-c", "user.name=PuckBot Agent",
       "-c", "user.email=grokky-agent@localhost",
       "commit", "-m", `task: ${title.replace(/\s+/g, " ").trim().slice(0, 160) || "completed work"}`,
       "--no-verify",
@@ -1726,7 +1726,7 @@ export class MainController {
     const approval: ComputerApprovalRequest = {
       id: `approval-${id()}`,
       deviceId: capability === "mcp" ? access.localDeviceId : access.activeDeviceId,
-      deviceName: capability === "mcp" ? "Grokky MCP gateway" : device?.name || "Computer",
+      deviceName: capability === "mcp" ? "PuckBot MCP gateway" : device?.name || "Computer",
       conversationId: conversation.id,
       capability,
       action: action.replaceAll("_", " "),

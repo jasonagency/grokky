@@ -23,15 +23,40 @@ describe("credential parsing", () => {
   });
 
   test("uses portable default credential locations", () => {
-    const previous = process.env.GROKKY_OPENROUTER_ENV_FILE;
+    const previousPuckBot = process.env.PUCKBOT_OPENROUTER_ENV_FILE;
+    const previousGrokky = process.env.GROKKY_OPENROUTER_ENV_FILE;
+    delete process.env.PUCKBOT_OPENROUTER_ENV_FILE;
     delete process.env.GROKKY_OPENROUTER_ENV_FILE;
     try {
       expect(defaultOpenRouterCredentialCandidates("/home/example")).toEqual([
+        join("/home/example", ".config", "puckbot", ".env"),
         join("/home/example", ".config", "grokky", ".env"),
       ]);
     } finally {
-      if (previous === undefined) delete process.env.GROKKY_OPENROUTER_ENV_FILE;
-      else process.env.GROKKY_OPENROUTER_ENV_FILE = previous;
+      if (previousPuckBot === undefined) delete process.env.PUCKBOT_OPENROUTER_ENV_FILE;
+      else process.env.PUCKBOT_OPENROUTER_ENV_FILE = previousPuckBot;
+      if (previousGrokky === undefined) delete process.env.GROKKY_OPENROUTER_ENV_FILE;
+      else process.env.GROKKY_OPENROUTER_ENV_FILE = previousGrokky;
+    }
+  });
+
+  test("prefers the PuckBot env-file override while retaining the legacy alias", () => {
+    const previousPuckBot = process.env.PUCKBOT_OPENROUTER_ENV_FILE;
+    const previousGrokky = process.env.GROKKY_OPENROUTER_ENV_FILE;
+    process.env.PUCKBOT_OPENROUTER_ENV_FILE = "/credentials/puckbot.env";
+    process.env.GROKKY_OPENROUTER_ENV_FILE = "/credentials/grokky.env";
+    try {
+      expect(defaultOpenRouterCredentialCandidates("/home/example")).toEqual([
+        "/credentials/puckbot.env",
+        "/credentials/grokky.env",
+        join("/home/example", ".config", "puckbot", ".env"),
+        join("/home/example", ".config", "grokky", ".env"),
+      ]);
+    } finally {
+      if (previousPuckBot === undefined) delete process.env.PUCKBOT_OPENROUTER_ENV_FILE;
+      else process.env.PUCKBOT_OPENROUTER_ENV_FILE = previousPuckBot;
+      if (previousGrokky === undefined) delete process.env.GROKKY_OPENROUTER_ENV_FILE;
+      else process.env.GROKKY_OPENROUTER_ENV_FILE = previousGrokky;
     }
   });
 });

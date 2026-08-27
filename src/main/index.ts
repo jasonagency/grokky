@@ -27,6 +27,7 @@ import { MemoryService } from "./team/memory-service";
 import { RoutineService } from "./team/routine-service";
 import { ScreenSessionManager } from "../runner/screen-session-manager";
 import { createElectronUpdateAdapter, DisabledUpdateAdapter, UpdateService } from "./update-service";
+import { preparePuckBotUserDataDirectory, PRODUCT_NAME, resolveUserDataOverride } from "./app-identity";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
@@ -36,7 +37,8 @@ let databaseClosed = false;
 let databaseClosing = false;
 let explicitQuitRequested = false;
 
-if (process.env.GROKKY_USER_DATA_PATH) app.setPath("userData", process.env.GROKKY_USER_DATA_PATH);
+const explicitUserDataPath = resolveUserDataOverride(process.env.PUCKBOT_USER_DATA_PATH, process.env.GROKKY_USER_DATA_PATH);
+app.setPath("userData", preparePuckBotUserDataDirectory(app.getPath("appData"), explicitUserDataPath).path);
 
 async function createWindow(controller: MainController): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -45,7 +47,7 @@ async function createWindow(controller: MainController): Promise<void> {
     minWidth: 1060,
     minHeight: 700,
     show: false,
-    title: "Grokky",
+    title: PRODUCT_NAME,
     ...(process.platform === "darwin" ? {
       titleBarStyle: "hiddenInset" as const,
       trafficLightPosition: { x: 18, y: 18 },
@@ -88,9 +90,9 @@ function ensureTray(): void {
   if (tray || !app.isReady()) return;
   const image = nativeImage.createFromPath(join(app.getAppPath(), "build/icon-mascot.png")).resize({ width: 18, height: 18 });
   tray = new Tray(image);
-  tray.setToolTip("Grokky is running local agent work");
+  tray.setToolTip("PuckBot is running local agent work");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show Grokky", click: () => { void showTask(); } },
+    { label: "Show PuckBot", click: () => { void showTask(); } },
     { type: "separator" },
     { label: "Quit and stop local work", click: () => { explicitQuitRequested = true; app.quit(); } },
   ]));
@@ -189,9 +191,9 @@ app.whenReady().then(async () => {
             info: {
               version: "9.4.0",
               channel: "stable",
-              releaseName: "Grokky 9.4",
+              releaseName: "PuckBot 9.4",
               releaseUrl: "https://github.com/jasonagency/grokky/releases/tag/v9.4.0",
-              files: [{ url: "https://github.com/jasonagency/grokky/releases/download/v9.4.0/Grokky.dmg", sha512: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" }],
+              files: [{ url: "https://github.com/jasonagency/grokky/releases/download/v9.4.0/PuckBot.dmg", sha512: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" }],
             },
             blockers: ["1 local conversation is still running", "1 workspace integration is unresolved"],
           };
@@ -332,7 +334,7 @@ app.whenReady().then(async () => {
               tool: "spawn_agent",
               kind: "assignment",
               senderThreadId: active.id,
-              senderName: "Grokky lead",
+              senderName: "PuckBot lead",
               receiverThreadId: `smoke-thread-${index}`,
               receiverName: agent.name,
               content: index === 0 ? "Trace the renderer state and identify the cause." : "Independently verify the interaction and edge cases.",
@@ -360,7 +362,7 @@ app.whenReady().then(async () => {
                 tool: "spawn_agent",
                 kind: "assignment" as const,
                 senderThreadId: active.id,
-                senderName: "Grokky lead",
+                senderName: "PuckBot lead",
                 receiverThreadId: `smoke-thread-${index}`,
                 receiverName: agent.name,
                 content: index === 0 ? "Trace the renderer state and identify the cause." : "Independently verify the interaction and edge cases.",
@@ -375,7 +377,7 @@ app.whenReady().then(async () => {
                 senderThreadId: `smoke-thread-${index}`,
                 senderName: agent.name,
                 receiverThreadId: active.id,
-                receiverName: "Grokky lead",
+                receiverName: "PuckBot lead",
                 content: index === 0 ? "The renderer hid selected crew until the first orchestration event." : "The queued state and live handoff now cover the missing feedback window.",
                 status: "completed" as const,
                 createdAt: now - 900 + index * 180,
@@ -814,7 +816,7 @@ app.whenReady().then(async () => {
               if (${JSON.stringify(smokeView)} === 'crew-parallel' && panel && panel.getBoundingClientRect().height > 330) violations.push('default live crew panel is still visually oversized');
               if (${JSON.stringify(smokeView)} === 'crew-parallel' && !panel?.querySelector('.crew-run-row.is-queued')) violations.push('dependent specialist disappears before its handoff');
               if (${JSON.stringify(smokeView)} === 'crew-parallel' && !panel?.textContent?.includes('Queued for handoff')) violations.push('dependent specialist is not labelled as queued for handoff');
-              if (document.querySelector('.activity-heading span')?.textContent === 'Grokky is working') violations.push('generic working state is still shown instead of crew progress');
+              if (document.querySelector('.activity-heading span')?.textContent === 'PuckBot is working') violations.push('generic working state is still shown instead of crew progress');
             }
             if (${JSON.stringify(smokeView)} === 'delete-dialog') {
               const dialog = document.querySelector('.delete-dialog[role="alertdialog"]');
@@ -843,7 +845,7 @@ app.whenReady().then(async () => {
       }
       console.log("grokky-renderer-ok");
     } catch (error) {
-      console.error("Grokky renderer smoke failed:", error);
+      console.error("PuckBot renderer smoke failed:", error);
       app.exit(2);
       return;
     }
@@ -872,7 +874,7 @@ app.on("before-quit", (event) => {
       type: "warning",
       title: "Stop local agent work?",
       message: `${count} local ${count === 1 ? "run is" : "runs are"} still active.`,
-      detail: "Keep Grokky running in the tray, or checkpoint what can be recovered and stop the active local work before quitting.",
+      detail: "Keep PuckBot running in the tray, or checkpoint what can be recovered and stop the active local work before quitting.",
       buttons: ["Keep Running", "Quit and Stop Work"],
       defaultId: 0,
       cancelId: 0,

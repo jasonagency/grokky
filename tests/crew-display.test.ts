@@ -50,23 +50,23 @@ describe("crew display state", () => {
       senderThreadId,
       senderName,
       receiverThreadId: "lead",
-      receiverName: "Grokky lead",
+      receiverName: "PuckBot lead",
       content: id,
       status: "completed",
       createdAt,
     });
     const groups = groupCrewCommunications([
       communication("explorer-report", "explorer", "explorer", 30),
-      communication("worker-assignment", "lead", "Grokky lead", 20),
-      communication("explorer-assignment", "lead", "Grokky lead", 10),
+      communication("worker-assignment", "lead", "PuckBot lead", 20),
+      communication("explorer-assignment", "lead", "PuckBot lead", 10),
       communication("worker-report", "worker", "worker", 40),
-      communication("lead-followup", "lead", "Grokky lead", 50),
+      communication("lead-followup", "lead", "PuckBot lead", 50),
     ]);
     expect(groups.map((group) => [group.senderName, group.entries.map((entry) => entry.id)])).toEqual([
-      ["Grokky lead", ["explorer-assignment", "worker-assignment"]],
+      ["PuckBot lead", ["explorer-assignment", "worker-assignment"]],
       ["explorer", ["explorer-report"]],
       ["worker", ["worker-report"]],
-      ["Grokky lead", ["lead-followup"]],
+      ["PuckBot lead", ["lead-followup"]],
     ]);
   });
 

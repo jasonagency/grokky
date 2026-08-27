@@ -52,7 +52,7 @@ export class CodexAppServerClient {
 
   async initialize(): Promise<void> {
     const result = await this.request("initialize", {
-      clientInfo: { name: "grokky", title: "Grokky", version: "0.1.2" },
+      clientInfo: { name: "grokky", title: "PuckBot", version: "0.1.2" },
       capabilities: { experimentalApi: true, requestAttestation: false },
     });
     if (!result || typeof result !== "object" || typeof (result as Record<string, unknown>).userAgent !== "string") {

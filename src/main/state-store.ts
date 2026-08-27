@@ -207,13 +207,17 @@ function normalizeCrewCommunication(value: unknown): CrewCommunication | null {
     tool: item.tool,
     kind: item.kind as CrewCommunication["kind"],
     senderThreadId: item.senderThreadId,
-    senderName: item.senderName.slice(0, 120),
+    senderName: normalizeCrewParticipantName(item.senderName),
     receiverThreadId: item.receiverThreadId,
-    receiverName: item.receiverName.slice(0, 120),
+    receiverName: normalizeCrewParticipantName(item.receiverName),
     ...(typeof item.content === "string" ? { content: item.content.slice(0, 12_000) } : {}),
     status: item.status as CrewCommunication["status"],
     createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
   };
+}
+
+function normalizeCrewParticipantName(value: string): string {
+  return (value === "Grokky lead" ? "PuckBot lead" : value).slice(0, 120);
 }
 
 function isBenignSkillsNotice(value: unknown): boolean {

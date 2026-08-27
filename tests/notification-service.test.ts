@@ -11,7 +11,7 @@ describe("notification service", () => {
 
     const record = await service.notify({ type: "integration-conflict", title: "Integration needs attention", body: "Resolve src/app.ts", taskId: "task-1" });
 
-    expect(record).toMatchObject({ delivery: "in-app", taskId: "task-1", deepLink: "grokky://tasks/task-1" });
+    expect(record).toMatchObject({ delivery: "in-app", taskId: "task-1", deepLink: "puckbot://tasks/task-1" });
     expect(service.snapshot().notifications).toHaveLength(1);
   });
 });
