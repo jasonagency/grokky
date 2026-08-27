@@ -17,7 +17,7 @@ import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools"
 import { assertCompatibleProtocol, assertSecureRemoteEndpoint } from "../shared/remote-protocol";
 import type { ScreenSessionManager } from "../runner/screen-session-manager";
 import { FetchHostTransport, HostClient } from "./remote/host-client";
-import type { RemoteControlCommand, RemoteEventFrame, RemoteJobRecord, RemoteJobRequest } from "../shared/remote-protocol";
+import type { RemoteControlCommand, RemoteEventFrame, RemoteJobRecord, RemoteJobRequest, RemoteRoutineRecord, RemoteRoutineRegistration } from "../shared/remote-protocol";
 import type { AgentScreenSnapshot } from "../shared/remote-protocol";
 import { FetchRemoteScreenTransport, ScreenClient } from "./remote/screen-client";
 
@@ -263,6 +263,7 @@ export class ComputerAccessService {
       encryptedToken: this.secrets.seal(payload.token),
       capabilities: payload.device.capabilities.filter((capability) => localCapabilities.includes(capability)),
       lastSeenAt: Date.now(),
+      eventCursor: 0,
       revoked: false,
     };
     const existing = state.remoteDevices.findIndex((device) => device.id === record.id);
@@ -374,6 +375,20 @@ export class ComputerAccessService {
 
   remoteEvents(client: HostClient, afterCursor: number): Promise<RemoteEventFrame[]> { return client.events(afterCursor); }
   remoteControl(client: HostClient, command: RemoteControlCommand) { return client.control(command); }
+  async upsertRemoteRoutine(state: PersistedComputerAccess, deviceId: string, routine: RemoteRoutineRegistration): Promise<RemoteRoutineRecord> { const client = this.remoteHostClient(state, deviceId); const capabilities = await client.connect(); if (capabilities.hostId !== deviceId) throw new Error("Paired device identity does not match the remote agent host"); return client.upsertRoutine(routine); }
+
+  async pollRemoteEvents(state: PersistedComputerAccess): Promise<Array<{ deviceId: string; frames: RemoteEventFrame[] }>> {
+    const devices = state.remoteDevices.filter((device) => !device.revoked);
+    const results = await Promise.allSettled(devices.map(async (device) => {
+      const client = this.remoteHostClient(state, device.id);
+      const capabilities = await client.connect();
+      if (capabilities.hostId !== device.id) throw new Error("Paired device identity does not match the remote agent host");
+      const frames = await client.events(device.eventCursor);
+      device.lastSeenAt = Date.now();
+      return { deviceId: device.id, frames };
+    }));
+    return results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  }
 
   async refreshRemoteScreens(state: PersistedComputerAccess): Promise<boolean> {
     if (state.activeDeviceId === state.localDeviceId) return false;

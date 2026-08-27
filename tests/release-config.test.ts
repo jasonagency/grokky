@@ -35,6 +35,7 @@ describe("signed release configuration", () => {
 
     const packaging = await text("scripts/package-platform.mjs");
     expect(packaging).toContain("forceCodeSigning=true");
+    expect(packaging).toContain('!releaseBuild ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }');
     expect(packaging).toContain("WIN_PUBLISHER_NAME");
     expect(packaging).toContain("GROKKY_REQUIRE_SIGNED");
 

@@ -18,8 +18,13 @@ export class HostScheduler {
 
   async start(jobId: string): Promise<void> {
     if (this.controllers.has(jobId)) return;
-    const job = this.store.snapshot().jobs.find((item) => item.id === jobId);
+    const snapshot = this.store.snapshot();
+    const job = snapshot.jobs.find((item) => item.id === jobId);
     if (!job || job.status !== "queued") return;
+    const dependencies = (job.dependsOn ?? []).map((id) => snapshot.jobs.find((candidate) => candidate.id === id));
+    if (dependencies.some((dependency) => !dependency || !new Set(["succeeded", "failed", "canceled", "interrupted"]).has(dependency.status))) return;
+    const failedDependency = dependencies.find((dependency) => dependency?.status !== "succeeded");
+    if (failedDependency) { const error = `Dependency ${failedDependency.id} ended with ${failedDependency.status}`; await this.transition(jobId, "failed", error); await this.sink.emit(this.store.snapshot().jobs.find((item) => item.id === jobId)!, "job.failed", { error }); this.wake(); return; }
     const controller = new AbortController(); this.controllers.set(jobId, controller);
     await this.transition(jobId, "running");
     const running = this.store.snapshot().jobs.find((item) => item.id === jobId)!;
@@ -27,8 +32,10 @@ export class HostScheduler {
     try {
       const output = await this.registry.handler(running.harnessId)(running, { signal: controller.signal, emit: async (type, payload) => {
         if (type === "job.approval") {
-          await this.transition(jobId, "waiting-approval");
+          if (running.approvalPolicy === "ask") await this.transition(jobId, "waiting-approval");
           await this.sink.emit(this.store.snapshot().jobs.find((item) => item.id === jobId)!, type, payload);
+          if (running.approvalPolicy === "allow") return;
+          if (running.approvalPolicy === "deny") throw new Error("Remote approval is denied by policy");
           const allowed = await new Promise<boolean>((resolve) => this.approvalResolvers.set(jobId, resolve));
           this.approvalResolvers.delete(jobId);
           if (!allowed) throw new Error("Operator denied the remote approval");
@@ -44,7 +51,7 @@ export class HostScheduler {
       if (controller.signal.aborted) return;
       await this.transition(jobId, "failed", error instanceof Error ? error.message : "Host harness failed");
       await this.sink.emit(this.store.snapshot().jobs.find((item) => item.id === jobId)!, "job.failed", { error: error instanceof Error ? error.message : "Host harness failed" });
-    } finally { this.controllers.delete(jobId); }
+    } finally { this.controllers.delete(jobId); this.wake(); }
   }
 
   async cancel(jobId: string): Promise<void> {
@@ -64,6 +71,7 @@ export class HostScheduler {
   }
 
   shutdown(): void { for (const resolver of this.approvalResolvers.values()) resolver(false); this.approvalResolvers.clear(); for (const controller of this.controllers.values()) controller.abort(); this.controllers.clear(); }
+  wake(): void { for (const job of this.store.snapshot().jobs) if (job.status === "queued") void this.start(job.id); }
 
   private async interrupt(jobId: string, error: string): Promise<void> { await this.transition(jobId, "interrupted", error); const job = this.store.snapshot().jobs.find((item) => item.id === jobId); if (job) await this.sink.emit(job, "job.failed", { error, interrupted: true }); }
   private async transition(jobId: string, status: RemoteJobRecord["status"], error?: string): Promise<void> {

@@ -93,6 +93,32 @@ describe("offline remote host", () => {
     expect(host.snapshot().jobs[0]?.status).toBe("succeeded");
   });
 
+  test("starts a registered routine graph after its fire time with no desktop connected", async () => {
+    let now = 10; const order: string[] = [];
+    const registry = new HostHarnessRegistry(); registry.register("fixture", async (job, context) => { order.push((job.payload as { node: string }).node); if ((job.payload as { approval?: boolean }).approval) await context.emit("job.approval", { action: "publish" }); return `done:${(job.payload as { node: string }).node}`; });
+    const host = new AgentHost("host", new HostStore(), registry, "secret", () => now); await host.initialize();
+    await host.upsertRoutine("secret", {
+      id: "routine:offline", version: 1, enabled: true, nextFireAt: 100, schedule: { localTime: "00:00", timeZone: "UTC" },
+      nodes: [
+        { id: "research", dependsOn: [], harnessId: "fixture", payload: { node: "research" }, approvalPolicy: "allow", budgetUsd: 1 },
+        { id: "publish", dependsOn: ["research"], harnessId: "fixture", payload: { node: "publish", approval: true }, approvalPolicy: "ask", budgetUsd: 1 },
+      ],
+    });
+    expect(host.snapshot().jobs).toHaveLength(0);
+
+    now = 100; await host.runDueRoutines();
+    await eventually(() => host.snapshot().jobs.some((job) => job.status === "waiting-approval"));
+    expect(order).toEqual(["research", "publish"]);
+    const publish = host.snapshot().jobs.find((job) => job.payload && (job.payload as { node?: string }).node === "publish")!;
+    const client = new HostClient("http://127.0.0.1:4747", "secret", transport(host)); await client.connect();
+    const beforeReconnect = host.snapshot().events.length;
+    await client.control({ id: "routine-approve", jobId: publish.id, leaseEpoch: publish.leaseEpoch, afterCursor: 0, type: "approve", decision: "allow" });
+    await eventually(() => host.snapshot().jobs.every((job) => job.status === "succeeded"));
+    expect((await client.events(0)).length).toBeGreaterThan(beforeReconnect);
+    await host.runDueRoutines();
+    expect(host.snapshot().jobs).toHaveLength(2);
+  });
+
   test("host restart marks an unrecoverable active harness interrupted and retains its spool", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-host-restart-"));
     const pathname = join(directory, "host.json");

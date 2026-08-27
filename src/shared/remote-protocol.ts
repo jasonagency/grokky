@@ -25,6 +25,8 @@ export interface RemoteJobRequest {
   payload: unknown;
   approvalPolicy: "ask" | "allow" | "deny";
   budgetUsd: number;
+  dependsOn?: string[];
+  routine?: { routineId: string; occurrenceKey: string; nodeId: string };
 }
 
 export type RemoteJobStatus = "queued" | "running" | "waiting-approval" | "succeeded" | "failed" | "canceled" | "interrupted";
@@ -62,6 +64,30 @@ export interface RemoteHostState {
   jobs: RemoteJobRecord[];
   events: RemoteEventFrame[];
   commandIds: string[];
+  routines: RemoteRoutineRecord[];
+}
+
+export interface RemoteRoutineNode {
+  id: string;
+  dependsOn: string[];
+  harnessId: string;
+  payload: unknown;
+  approvalPolicy: RemoteJobRequest["approvalPolicy"];
+  budgetUsd: number;
+}
+
+export interface RemoteRoutineRegistration {
+  id: string;
+  version: number;
+  enabled: boolean;
+  schedule: { localTime: string; timeZone: string; daysOfWeek?: number[] };
+  nextFireAt: number;
+  nodes: RemoteRoutineNode[];
+}
+
+export interface RemoteRoutineRecord extends RemoteRoutineRegistration {
+  lastOccurrenceKey?: string;
+  updatedAt: number;
 }
 
 export interface RemoteReconciliationState {

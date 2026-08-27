@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { ComputerCapabilityId, SandboxMode } from "../shared/contracts";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
 import { REMOTE_PROTOCOL } from "../shared/remote-protocol";
-import type { RemoteControlCommand, RemoteJobRequest } from "../shared/remote-protocol";
+import type { RemoteControlCommand, RemoteJobRequest, RemoteRoutineRegistration } from "../shared/remote-protocol";
 import type { ScreenInput, ScreenKind } from "../shared/remote-protocol";
 import type { AgentHost } from "../runner/agent-host";
 import { AgentHost as DefaultAgentHost } from "../runner/agent-host";
@@ -188,6 +188,7 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
         send(response, 200, await agentHost.control(state.token, body.command as RemoteControlCommand));
         return;
       }
+      if (url.pathname === "/host/routines" && agentHost) { send(response, 200, { routine: await agentHost.upsertRoutine(state.token, body.routine as RemoteRoutineRegistration) }); return; }
       if (url.pathname === "/host/screens" && agentHost) { send(response, 200, { screens: agentHost.screenSnapshot(state.token) }); return; }
       if (url.pathname === "/host/screens/lease" && agentHost) { send(response, 200, { lease: await agentHost.leaseScreen(state.token, String(body.agentId), body.kind as ScreenKind) }); return; }
       if (url.pathname === "/host/screens/capture" && agentHost) { send(response, 200, { frame: await agentHost.captureScreen(state.token, String(body.leaseId), Number(body.epoch)) }); return; }

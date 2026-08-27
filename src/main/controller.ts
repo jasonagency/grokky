@@ -62,7 +62,7 @@ import type { MemoryService } from "./team/memory-service";
 import type { RoutineService } from "./team/routine-service";
 import type { UpdateService } from "./update-service";
 import type { HostClient } from "./remote/host-client";
-import type { RemoteEventFrame } from "../shared/remote-protocol";
+import type { RemoteEventFrame, RemoteRoutineRegistration } from "../shared/remote-protocol";
 import { validateHarnessEvent } from "./harnesses/types";
 
 function id(): string {
@@ -111,10 +111,12 @@ export class MainController {
   private routineTimer?: ReturnType<typeof setInterval>;
   private taskDispatchTimer?: ReturnType<typeof setInterval>;
   private remoteScreenTimer?: ReturnType<typeof setInterval>;
+  private remoteRefreshPromise?: Promise<void>;
   private taskDispatchPromise?: Promise<void>;
   private readonly taskControllers = new Map<string, AbortController>();
   private readonly taskSessions = new Map<string, string>();
   private readonly remoteTaskClients = new Map<string, { client: HostClient; jobId: string; leaseEpoch: number; cursor: number }>();
+  private readonly routineSyncFailures = new Set<string>();
   private readonly capabilities: CapabilitiesService;
   private readonly agents: AgentService;
   private unsubscribeProjection?: () => void;
@@ -154,11 +156,11 @@ export class MainController {
       await this.taskScheduler.initialize();
       await new LeaseReconciler(this.taskScheduler).reconcileExpired();
     }
-    this.remoteScreenTimer = setInterval(() => { void this.refreshRemoteScreens(); }, 3_000);
-    await this.refreshRemoteScreens();
     await this.workspaceLeases?.initialize();
     await this.steering?.initialize();
     await this.notifications?.initialize();
+    await this.refreshRemoteHostState();
+    this.remoteScreenTimer = setInterval(() => { void this.refreshRemoteHostState(); }, 3_000);
     await this.evaluations?.initialize();
     await this.traces?.applyRetention();
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
@@ -168,8 +170,9 @@ export class MainController {
       await this.teamRuntime.importDefinitions(await this.agents.list(this.activeWorkingDirectory()));
     }
     await this.refreshProviderStatuses(false);
+    await this.syncRemoteRoutines();
     await this.dispatchDueRoutines();
-    if (this.routines) this.routineTimer = setInterval(() => { void this.dispatchDueRoutines().then(() => this.scheduleTaskDispatch()).catch(() => undefined); }, 60_000);
+    if (this.routines) this.routineTimer = setInterval(() => { void this.syncRemoteRoutines().then(() => this.dispatchDueRoutines()).then(() => this.scheduleTaskDispatch()).catch(() => undefined); }, 60_000);
     await this.store.save(this.state);
     this.initialized = true;
     if (this.taskScheduler) {
@@ -206,6 +209,7 @@ export class MainController {
     for (const run of this.taskControllers.values()) run.abort();
     await Promise.allSettled(this.runTasks.values());
     await this.taskDispatchPromise?.catch(() => undefined);
+    await this.remoteRefreshPromise?.catch(() => undefined);
     await this.harnessRegistry.cleanup();
     await this.toolGateway.close();
   }
@@ -682,6 +686,65 @@ export class MainController {
     }
   }
 
+  private refreshRemoteHostState(): Promise<void> {
+    if (this.remoteRefreshPromise) return this.remoteRefreshPromise;
+    const operation = Promise.allSettled([this.refreshRemoteScreens(), this.reconcileRemoteHostEvents()]).then(() => undefined);
+    this.remoteRefreshPromise = operation;
+    void operation.finally(() => { if (this.remoteRefreshPromise === operation) this.remoteRefreshPromise = undefined; });
+    return operation;
+  }
+
+  private async reconcileRemoteHostEvents(): Promise<void> {
+    if (!this.controlPlane) return;
+    const batches = await this.computerAccess.pollRemoteEvents(this.state.computerAccess);
+    const knownTaskJobs = this.knownRemoteTaskJobIds();
+    let changed = false;
+    for (const { deviceId, frames } of batches) {
+      for (const frame of frames) {
+        if (knownTaskJobs.has(frame.jobId)) continue;
+        const result = await this.controlPlane.record({
+          id: `remote:${frame.jobId}:${frame.cursor}`,
+          aggregateId: frame.jobId,
+          source: "grokky.remote-host",
+          type: "diagnostic.recorded",
+          payload: { remote: { deviceId, cursor: frame.cursor, type: frame.type, payload: frame.payload } },
+          timestamp: frame.timestamp,
+        });
+        if (result.status === "appended") {
+          changed = true;
+          await this.notifyRemoteHostFrame(frame);
+        }
+      }
+      if (frames.length) {
+        const device = this.state.computerAccess.remoteDevices.find((entry) => entry.id === deviceId);
+        if (device) device.eventCursor = Math.max(device.eventCursor, ...frames.map((frame) => frame.cursor));
+      }
+    }
+    if (batches.some((batch) => batch.frames.length)) await this.store.save(this.state);
+    if (changed && this.initialized) this.publishSnapshot();
+  }
+
+  private knownRemoteTaskJobIds(): Set<string> {
+    const result = new Set(Array.from(this.remoteTaskClients.values(), ({ jobId }) => jobId));
+    for (const task of this.taskScheduler?.snapshot().tasks ?? []) {
+      const cursor = task.checkpoints.at(-1)?.cursor;
+      if (!cursor?.startsWith("remote:")) continue;
+      try {
+        const jobId = (JSON.parse(cursor.slice("remote:".length)) as { jobId?: unknown }).jobId;
+        if (typeof jobId === "string") result.add(jobId);
+      } catch {
+        // Invalid checkpoints are handled by the task reconciler.
+      }
+    }
+    return result;
+  }
+
+  private async notifyRemoteHostFrame(frame: RemoteEventFrame): Promise<void> {
+    if (frame.type === "job.approval") await this.notifications?.notify({ type: "approval", title: "Remote routine needs approval", body: "An unattended routine is waiting on its paired host." });
+    if (frame.type === "job.completed") await this.notifications?.notify({ type: "task-terminal", title: "Remote routine step completed", body: this.remoteSummary(frame.payload, "The unattended routine step completed.") });
+    if (frame.type === "job.failed" || frame.type === "job.canceled") await this.notifications?.notify({ type: "routine-failed", title: "Remote routine step failed", body: this.remoteSummary(frame.payload, `The unattended routine step ${frame.type === "job.canceled" ? "was canceled" : "failed"}.`) });
+  }
+
   async updateComputerNetworkAllowlist(domains: string[]): Promise<void> {
     this.state.computerAccess.networkAllowlist = [...new Set(domains.map((domain) => domain.trim().toLowerCase()).filter(Boolean))].slice(0, 100);
     await this.commit();
@@ -855,6 +918,7 @@ export class MainController {
   async createAgentRoutine(input: Omit<AgentRoutine, "id" | "version" | "nextFireAt" | "lastOccurrenceKey" | "createdAt" | "updatedAt">) {
     if (!this.routines) throw new Error("Agent routines are not available");
     const routine = await this.routines.create(input);
+    if (this.isRemoteRoutine(routine)) await this.syncRemoteRoutine(routine).catch((error) => this.notifyRoutineSyncFailure(routine, error));
     this.publishSnapshot();
     return routine;
   }
@@ -878,7 +942,7 @@ export class MainController {
 
   private async dispatchDueRoutines(): Promise<void> {
     if (!this.routines || !this.taskScheduler) return;
-    const occurrences = await this.routines.due();
+    const occurrences = (await this.routines.due()).filter(({ routine }) => !this.isRemoteRoutine(routine));
     for (const { routine, occurrenceKey } of occurrences) {
       const prefix = occurrenceKey.replace(/[^a-zA-Z0-9:_-]/g, "-");
       const idMap = new Map(routine.template.nodes.map((node) => [node.id, `${prefix}:${node.id}`]));
@@ -906,6 +970,56 @@ export class MainController {
       if (!alreadyQueued) await this.notifications?.notify({ type: "routine-due", title: `Routine started: ${routine.name}`, body: "A scheduled task graph was queued.", taskId: idMap.values().next().value });
     }
     if (occurrences.length) this.publishSnapshot();
+  }
+
+  private isRemoteRoutine(routine: AgentRoutine): boolean {
+    return routine.targetHostId !== "local" && routine.targetHostId !== this.state.computerAccess.localDeviceId;
+  }
+
+  private async syncRemoteRoutines(): Promise<void> {
+    if (!this.routines || !this.teamRuntime) return;
+    const routines = this.teamRuntime.snapshot().routines.filter((routine) => this.isRemoteRoutine(routine));
+    await Promise.all(routines.map((routine) => this.syncRemoteRoutine(routine).catch((error) => this.notifyRoutineSyncFailure(routine, error))));
+  }
+
+  private async syncRemoteRoutine(routine: AgentRoutine): Promise<void> {
+    if (!this.routines) return;
+    const source = this.state.conversations.find((conversation) => conversation.id === this.state.activeConversationId) ?? this.state.conversations[0];
+    if (!source) throw new Error("Remote routine registration requires a source conversation");
+    const owner = this.teamRuntime?.snapshot().agents.find((agent) => agent.id === routine.ownerAgentId)?.profile;
+    const nodes: RemoteRoutineRegistration["nodes"] = routine.template.nodes.map((node) => {
+      const harnessId = node.assignment?.harnessId ?? source.harnessId;
+      if (!harnessId) throw new Error(`Routine node ${node.id} has no harness assignment`);
+      const descriptor = this.harnesses.find((entry) => entry.id === harnessId);
+      if (!descriptor) throw new Error(`Routine harness ${harnessId} is not registered`);
+      const model = node.assignment?.model ?? (source.harnessId === harnessId ? source.model : descriptor.models[0]?.id);
+      if (!model) throw new Error(`Routine node ${node.id} has no model assignment`);
+      return {
+        id: node.id,
+        dependsOn: node.dependsOn ?? [],
+        harnessId,
+        payload: {
+          prompt: node.description || node.title,
+          model,
+          reasoning: owner?.reasoning ?? source.reasoning,
+          sandboxMode: node.assignment?.workspaceMode === "read" ? "read-only" : owner?.sandboxMode ?? source.sandboxMode,
+          allowCommands: node.assignment?.workspaceMode !== "read" && source.allowCommands,
+          ...(owner ? { agents: [owner] } : {}),
+          ...(node.assignment?.screenKind ? { screenKind: node.assignment.screenKind } : {}),
+        },
+        approvalPolicy: node.assignment?.approvalPolicy ?? (routine.approvalBoundary === "never" ? "allow" : "ask"),
+        budgetUsd: node.assignment?.budgetUsd ?? routine.budgetUsd,
+      };
+    });
+    const remote = await this.computerAccess.upsertRemoteRoutine(this.state.computerAccess, routine.targetHostId, { id: routine.id, version: routine.version, enabled: routine.active, schedule: routine.schedule, nextFireAt: routine.nextFireAt, nodes });
+    await this.routines.alignRemote(routine.id, { nextFireAt: remote.nextFireAt, ...(remote.lastOccurrenceKey ? { lastOccurrenceKey: remote.lastOccurrenceKey } : {}) });
+    this.routineSyncFailures.delete(routine.id);
+  }
+
+  private async notifyRoutineSyncFailure(routine: AgentRoutine, error: unknown): Promise<void> {
+    if (this.routineSyncFailures.has(routine.id)) return;
+    await this.notifications?.notify({ type: "routine-failed", title: `Routine host unavailable: ${routine.name}`, body: error instanceof Error ? error.message : "Remote routine registration failed" });
+    this.routineSyncFailures.add(routine.id);
   }
 
   private scheduleTaskDispatch(): void {

@@ -16,6 +16,8 @@ import { AgentHost } from "../src/runner/agent-host";
 import { HostStore } from "../src/runner/host-store";
 import { HostHarnessRegistry } from "../src/runner/host-harness-registry";
 import { SteeringService } from "../src/main/control-plane/steering-service";
+import { AgentRuntimeService, TeamRepository } from "../src/main/team/agent-runtime-service";
+import { RoutineService } from "../src/main/team/routine-service";
 
 async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -26,6 +28,48 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<voi
 }
 
 describe("controller task dispatch", () => {
+  test("reconciles a host-owned routine that fired while the desktop was closed", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "grokky-remote-routine-"));
+    const remoteRoot = await mkdtemp(join(tmpdir(), "grokky-routine-host-"));
+    let hostNow = Date.parse("2026-01-01T00:00:00Z");
+    let agentHost!: AgentHost;
+    const runner = await startRunnerServer({
+      root: remoteRoot, statePath: join(remoteRoot, "runner.json"), host: "127.0.0.1", port: 0,
+      agentHostFactory: (credential, deviceId) => {
+        const registry = new HostHarnessRegistry();
+        registry.register("codex-sdk", async () => "finished unattended");
+        agentHost = new AgentHost(deviceId, new HostStore(join(remoteRoot, "host.json")), registry, credential, () => hostNow);
+        return agentHost;
+      },
+    });
+    const databasePath = join(directory, "control.sqlite3"); const statePath = join(directory, "state.json");
+    const database1 = new DirectDatabaseClient(databasePath); await database1.initialize();
+    const store1 = new StateStore(statePath, directory); const state = await store1.load(); const computer = new ComputerAccessService(); await computer.pair(state.computerAccess, runner.endpoint, runner.code); await store1.save(state);
+    const adapter = new CodexSdkAdapter(async () => { throw new Error("local harness must not run"); }); adapter.health = async () => ({ ready: true, label: "Ready", source: "test", detail: "Ready" });
+    const repository1 = new TeamRepository(database1); const team1 = new AgentRuntimeService(repository1, () => hostNow); const routines1 = new RoutineService(repository1, () => hostNow);
+    const controller1 = new MainController(store1, directory, "test", computer, new ControlPlaneService(database1), new HarnessRegistry([adapter]), new TaskScheduler(database1, { concurrency: 1, leaseDurationMs: 30_000 }), new WorkspaceLeaseManager(database1, join(directory, "worktrees")), undefined, undefined, undefined, undefined, undefined, undefined, undefined, team1, undefined, undefined, routines1);
+    await controller1.initialize();
+    const routine = await controller1.createAgentRoutine({ ownerAgentId: "agent:overnight", name: "Overnight", template: { id: "overnight", title: "Overnight", objective: "Run away from desktop", nodes: [{ id: "step", title: "Unattended step", assignment: { harnessId: "codex-sdk", approvalPolicy: "allow" } }] }, schedule: { localTime: "00:01", timeZone: "UTC" }, targetHostId: runner.deviceId, budgetUsd: 1, approvalBoundary: "never", active: true });
+    expect(agentHost.snapshot().routines).toHaveLength(1);
+    await controller1.shutdown(); await store1.close(); await database1.close();
+
+    hostNow = routine.nextFireAt; await agentHost.runDueRoutines();
+    await waitFor(() => agentHost.snapshot().jobs[0]?.status === "succeeded");
+
+    const database2 = new DirectDatabaseClient(databasePath); await database2.initialize(); const store2 = new StateStore(statePath, directory);
+    const repository2 = new TeamRepository(database2); const team2 = new AgentRuntimeService(repository2, () => hostNow); const routines2 = new RoutineService(repository2, () => hostNow);
+    const controller2 = new MainController(store2, directory, "test", computer, new ControlPlaneService(database2), new HarnessRegistry([adapter]), new TaskScheduler(database2, { concurrency: 1, leaseDurationMs: 30_000 }), new WorkspaceLeaseManager(database2, join(directory, "worktrees")), undefined, undefined, undefined, undefined, undefined, undefined, undefined, team2, undefined, undefined, routines2);
+    try {
+      await controller2.initialize();
+      const events = (await database2.listEvents()).map((value) => JSON.parse(value) as { id: string; source: string });
+      expect(events.filter((event) => event.source === "grokky.remote-host")).toEqual(expect.arrayContaining([expect.objectContaining({ id: expect.stringContaining(agentHost.snapshot().jobs[0]!.id) })]));
+      const before = events.length;
+      await (controller2 as unknown as { refreshRemoteHostState(): Promise<void> }).refreshRemoteHostState();
+      expect((await database2.listEvents()).length).toBe(before);
+      const persisted = await store2.load(); expect(persisted.computerAccess.remoteDevices[0]!.eventCursor).toBe(agentHost.snapshot().cursor);
+    } finally { await controller2.shutdown(); await store2.close(); await database2.close(); await runner.close(); }
+  });
+
   test("transfers an assigned task to a paired host and settles it from signed events", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-remote-dispatch-"));
     const remoteRoot = await mkdtemp(join(tmpdir(), "grokky-remote-worker-"));

@@ -17,6 +17,22 @@ function remoteDatabase() { let value: string | null = null; return { readRemote
 async function eventually(check: () => boolean): Promise<void> { for (let index = 0; index < 100; index += 1) { if (check()) return; await new Promise((resolve) => setTimeout(resolve, 2)); } throw new Error("condition not reached"); }
 
 describe("remote host reconciliation", () => {
+  test("enforces allow, ask, and deny approval policies on the host", async () => {
+    const registry = new HostHarnessRegistry(); registry.register("fixture", async (_job, context) => { await context.emit("job.approval", { action: "publish" }); return "done"; });
+    const host = new AgentHost("host", new HostStore(), registry, "secret", () => 10); await host.initialize();
+    await host.submit("secret", { id: "allow-job", idempotencyKey: "allow-once", taskId: "allow-task", attemptId: "allow-attempt", leaseEpoch: 1, harnessId: "fixture", payload: {}, approvalPolicy: "allow", budgetUsd: 1 });
+    await host.submit("secret", { id: "deny-job", idempotencyKey: "deny-once", taskId: "deny-task", attemptId: "deny-attempt", leaseEpoch: 1, harnessId: "fixture", payload: {}, approvalPolicy: "deny", budgetUsd: 1 });
+    await host.submit("secret", { id: "ask-job", idempotencyKey: "ask-once", taskId: "ask-task", attemptId: "ask-attempt", leaseEpoch: 1, harnessId: "fixture", payload: {}, approvalPolicy: "ask", budgetUsd: 1 });
+    await eventually(() => host.snapshot().jobs.every((job) => ["succeeded", "failed", "waiting-approval"].includes(job.status)));
+    expect(host.snapshot().jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "allow-job", status: "succeeded" }),
+      expect.objectContaining({ id: "deny-job", status: "failed", error: "Remote approval is denied by policy" }),
+      expect.objectContaining({ id: "ask-job", status: "waiting-approval" }),
+    ]));
+    await host.control("secret", { id: "approve-ask", jobId: "ask-job", leaseEpoch: 1, afterCursor: 0, type: "approve", decision: "allow" });
+    await eventually(() => host.snapshot().jobs.find((job) => job.id === "ask-job")?.status === "succeeded");
+  });
+
   test("deduplicates job submission and reconciles ordered signed events", async () => {
     const registry = new HostHarnessRegistry(); registry.register("fixture", async () => "done");
     const host = new AgentHost("host", new HostStore(), registry, "secret", () => 10); await host.initialize();

@@ -79,7 +79,9 @@ if (releaseBuild) {
 }
 
 await run(process.execPath, [npmCli, "run", "build"]);
-await run(process.execPath, [electronBuilderCli, ...target.builderArgs]);
+await run(process.execPath, [electronBuilderCli, ...target.builderArgs], {
+  env: { ...process.env, ...(!releaseBuild ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" } : {}) },
+});
 await run(process.execPath, [packageVerifier, targetPlatform, targetArch], {
   env: { ...process.env, ...(releaseBuild ? { GROKKY_REQUIRE_SIGNED: "1" } : {}) },
 });

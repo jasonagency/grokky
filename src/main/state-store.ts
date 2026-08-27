@@ -24,6 +24,7 @@ export interface PersistedRemoteDevice {
   encryptedToken: string;
   capabilities: ComputerCapabilityId[];
   lastSeenAt: number;
+  eventCursor: number;
   revoked: boolean;
 }
 
@@ -134,6 +135,7 @@ function normalizeComputerAccess(value: unknown): PersistedComputerAccess {
             ? device.capabilities.filter((capability): capability is ComputerCapabilityId => capabilityIds.has(capability as ComputerCapabilityId))
             : ["files"],
           lastSeenAt: typeof device.lastSeenAt === "number" ? device.lastSeenAt : 0,
+          eventCursor: Number.isSafeInteger(device.eventCursor) && Number(device.eventCursor) >= 0 ? Number(device.eventCursor) : 0,
           revoked: device.revoked === true,
         }];
       }).slice(0, 24)

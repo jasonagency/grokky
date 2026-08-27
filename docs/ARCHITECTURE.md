@@ -326,11 +326,12 @@ Runner endpoints:
 | `POST /host/jobs` | Bearer token | Idempotently submit one durable harness attempt |
 | `POST /host/events` | Bearer token | Read signed ordered host events after a cursor |
 | `POST /host/control` | Bearer token | Cancel or approve work at a supported durable boundary |
+| `POST /host/routines` | Bearer token | Idempotently register or advance a versioned routine graph |
 | `POST /host/screens/*` | Bearer token | Lease, capture, control, and revoke agent screens |
 
 The runner's disk state uses mode `0600`. Grokky stores only an Electron `safeStorage` encrypted form of the bearer token. HTTP transport is designed for loopback or an encrypted private overlay network, not direct public exposure.
 
-With `--agent-host`, the runner constructs the same Codex App Server, Codex SDK fallback, OpenRouter, and Pi registry used by the desktop, but resolves readiness and credentials locally. Grokky-controlled workspace tools remain bounded by the runner root and startup flags. The protocol uses independently versioned job submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. Closing the desktop detaches monitoring without failing the attempt; reconnecting replays by cursor and settles the original task. Job submission is idempotent, so reconnecting or retrying an occurrence does not create duplicate work.
+With `--agent-host`, the runner constructs the same Codex App Server, Codex SDK fallback, OpenRouter, and Pi registry used by the desktop, but resolves readiness and credentials locally. Grokky-controlled workspace tools remain bounded by the runner root and startup flags. The protocol uses independently versioned job and routine submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. The host scheduler persists routine definitions, occurrence keys, graph dependencies, and job events before execution; this lets due work start without a desktop process. Closing the desktop detaches monitoring without failing the attempt. Reconnecting replays from the paired device's durable cursor, records unattended routine activity, and settles the original ordinary task. Submission and occurrence IDs are stable, so reconnecting or retrying does not create duplicate work.
 
 Browser screen provisioning connects to a loopback Chrome DevTools endpoint and opens separate pages in one persistent browser profile. Linux desktop provisioning leases only the explicit non-root X displays named at startup. Both flow through `ScreenSessionManager`, so screenshots, input, takeover, locks, expiration, audit history, and shared-trust labels use one contract.
 
@@ -355,7 +356,7 @@ flowchart LR
 
 Capability and agent writes are atomic. The settings layer edits only direct supported configuration blocks and preserves unrelated Codex configuration. Built-in agents cannot be overwritten or deleted; they can be duplicated into a user-owned definition.
 
-TOML files remain the portable role definition. The SQLite team runtime imports those roles and adds persistent harness session references, mailbox cursors, operator-reviewed memory, notification preferences, and versioned routines. Mailbox handoffs retain both ownership metadata and the receiving acknowledgement. Proposed memory is visible to the operator but is excluded from reviewed context until accepted. Routine occurrence keys are calculated in the configured timezone and persisted before task creation, preventing a restart or daylight-saving transition from enqueueing the same occurrence twice.
+TOML files remain the portable role definition. The SQLite team runtime imports those roles and adds persistent harness session references, mailbox cursors, operator-reviewed memory, notification preferences, and versioned routines. Mailbox handoffs retain both ownership metadata and the receiving acknowledgement. Proposed memory is visible to the operator but is excluded from reviewed context until accepted. Local routine occurrence keys are calculated in the configured timezone and persisted before task creation. Remote routines are versioned into the host spool, where their occurrence keys and stable node jobs are persisted before advancement. Both paths prevent restart, reconnect, or daylight-saving transitions from enqueueing an occurrence twice.
 
 ## Persistence model
 

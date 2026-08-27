@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import type { RemoteHostState } from "../shared/remote-protocol";
 import { REMOTE_PROTOCOL } from "../shared/remote-protocol";
 
-const EMPTY: RemoteHostState = { protocolMajor: REMOTE_PROTOCOL.major, cursor: 0, jobs: [], events: [], commandIds: [] };
+const EMPTY: RemoteHostState = { protocolMajor: REMOTE_PROTOCOL.major, cursor: 0, jobs: [], events: [], commandIds: [], routines: [] };
 
 export class HostStore {
   private state: RemoteHostState = structuredClone(EMPTY);
@@ -11,7 +11,7 @@ export class HostStore {
   constructor(private readonly pathname?: string) {}
   async initialize(): Promise<void> {
     if (!this.pathname) return;
-    try { this.state = JSON.parse(await readFile(this.pathname, "utf8")) as RemoteHostState; } catch (error) { if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error; }
+    try { const stored = JSON.parse(await readFile(this.pathname, "utf8")) as RemoteHostState; this.state = { ...stored, routines: Array.isArray(stored.routines) ? stored.routines : [] }; } catch (error) { if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error; }
   }
   snapshot(): RemoteHostState { return structuredClone(this.state); }
   async mutate<T>(operation: (state: RemoteHostState) => T | Promise<T>): Promise<T> {
