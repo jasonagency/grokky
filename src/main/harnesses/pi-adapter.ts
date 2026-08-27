@@ -40,7 +40,7 @@ function splitModel(value: string): { provider: string; modelId: string } {
 function safeSessionPath(pathname: string, sessionRoot: string): string {
   const candidate = resolve(pathname);
   const root = resolve(sessionRoot);
-  if (candidate !== root && !candidate.startsWith(`${root}${sep}`)) throw new Error("Pi session reference is outside Grokky session storage");
+  if (candidate !== root && !candidate.startsWith(`${root}${sep}`)) throw new Error("Pi session reference is outside PuckBot session storage");
   return candidate;
 }
 
@@ -137,7 +137,7 @@ export class PiAdapter implements HarnessAdapter {
     await context.onEvent({ type: "thread", threadId: reference });
     await context.onEvent({ type: "activity", activity: {
       id: `pi-resources-${session.sessionId}`, kind: "notice", label: "Pi controlled resources active",
-      detail: "Built-in tools and extensions are disabled. Grokky-gated tools and project guidance are active.", status: "completed", createdAt: Date.now(),
+      detail: "Built-in tools and extensions are disabled. PuckBot-gated tools and project guidance are active.", status: "completed", createdAt: Date.now(),
     } });
     const mapper = new PiEventMapper();
     let eventQueue = Promise.resolve();

@@ -54,7 +54,7 @@ function parseTomlString(content: string, key: string): string | undefined {
   return content.match(new RegExp(`^[ \\t]*${escaped}[ \\t]*=[ \\t]*'([^']*)'`, "m"))?.[1];
 }
 
-function parseGrokkyMetadata(content: string, key: string): string | undefined {
+function parseCommentString(content: string, key: string): string | undefined {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = content.match(new RegExp(`^[ \\t]*#[ \\t]*${escaped}[ \\t]*=[ \\t]*(\"(?:\\\\.|[^\"])*\")[ \\t]*$`, "m"));
   if (!match?.[1]) return undefined;
@@ -116,7 +116,7 @@ async function readAgent(pathname: string, scope: "personal" | "project"): Promi
     const model = parseTomlString(content, "model");
     const reasoning = parseTomlString(content, "model_reasoning_effort");
     const sandboxMode = parseTomlString(content, "sandbox_mode");
-    const icon = parseGrokkyMetadata(content, "grokky_icon");
+    const icon = parseCommentString(content, "grokky_icon");
     return {
       id: agentId(pathname),
       name,

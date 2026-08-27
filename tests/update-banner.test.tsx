@@ -11,7 +11,7 @@ describe("UpdateBanner", () => {
         version: "2.0.0",
         channel: "stable",
         releaseUrl: "https://github.com/jasonagency/grokky/releases/tag/v2.0.0",
-        files: [{ url: "https://github.com/jasonagency/grokky/releases/download/v2.0.0/Grokky.dmg", sha512: Buffer.alloc(64).toString("base64") }],
+        files: [{ url: "https://github.com/jasonagency/grokky/releases/download/v2.0.0/PuckBot.dmg", sha512: Buffer.alloc(64).toString("base64") }],
       },
       blockers: ["1 local conversation is still running", "1 operator approval is pending"],
     }} />);

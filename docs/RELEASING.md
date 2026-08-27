@@ -1,6 +1,6 @@
 # Release operations
 
-This runbook defines how Grokky produces signed desktop releases, validates automatic updates, recovers local state, and updates remote agent hosts. The ordinary Verify workflow produces unsigned development artifacts. Only the Signed release workflow creates distributable packages.
+This runbook defines how PuckBot produces signed desktop releases, validates automatic updates, recovers local state, and updates remote agent hosts. The ordinary Verify workflow produces unsigned development artifacts. Only the Signed release workflow creates distributable packages.
 
 ## Trust chain
 
@@ -55,7 +55,7 @@ The native jobs install the locked dependencies and run the full source verifica
 
 The macOS job checks:
 
-- Hardened signature validity for `Grokky.app`
+- Hardened signature validity for `PuckBot.app`
 - Signature validity for the bundled Codex executable
 - Gatekeeper assessment
 - Stapled notarization tickets for the application and DMG
@@ -90,7 +90,7 @@ Record the release tag, source commit, operating-system versions, installer dige
 
 Exercise this once before each stable release family and after any storage migration change:
 
-1. Close Grokky and protect a copy of the application data.
+1. Close PuckBot and protect a copy of the application data.
 2. Install the candidate over the previous stable version and launch it once.
 3. Verify `conversations.sqlite3.pre-migration-backup` exists and is private.
 4. Simulate a startup failure using a disposable database copy, never a user's only database.
@@ -109,7 +109,7 @@ If a release is unsafe:
 1. Mark the GitHub Release as a draft or remove it from publication.
 2. Do not reuse or move the affected tag.
 3. Publish a new higher patch version because the updater refuses downgrades.
-4. Restore from `conversations.sqlite3.pre-migration-backup` only with Grokky closed.
+4. Restore from `conversations.sqlite3.pre-migration-backup` only with PuckBot closed.
 5. If signing trust is affected, revoke and rotate the certificate before the replacement build.
 6. Add the failure as a deterministic regression test and link the incident evidence in the new release.
 

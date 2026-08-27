@@ -9,7 +9,7 @@ const release = (version = "1.1.0", channel: UpdateChannel = "stable"): UpdateRe
   version,
   channel,
   releaseUrl: `https://github.com/jasonagency/grokky/releases/tag/v${version}`,
-  files: [{ url: `https://github.com/jasonagency/grokky/releases/download/v${version}/Grokky.dmg`, sha512: checksum, size: 42_000 }],
+  files: [{ url: `https://github.com/jasonagency/grokky/releases/download/v${version}/PuckBot.dmg`, sha512: checksum, size: 42_000 }],
 });
 
 class FakeUpdateAdapter implements UpdateAdapter {
@@ -62,7 +62,7 @@ describe("UpdateService", () => {
     ["downgrade", release("0.9.0"), "Update is not newer"],
     ["wrong channel", release("1.1.0-beta.1", "beta"), "belongs to the beta channel"],
     ["malformed version", release("next"), "malformed version"],
-    ["insecure artifact", { ...release(), files: [{ ...release().files[0]!, url: "http://example.test/Grokky.dmg" }] }, "must use HTTPS"],
+    ["insecure artifact", { ...release(), files: [{ ...release().files[0]!, url: "http://example.test/PuckBot.dmg" }] }, "must use HTTPS"],
     ["invalid checksum", { ...release(), files: [{ ...release().files[0]!, sha512: "not-a-digest" }] }, "invalid SHA-512"],
   ])("rejects %s metadata before download", async (_name, info, message) => {
     const adapter = new FakeUpdateAdapter();

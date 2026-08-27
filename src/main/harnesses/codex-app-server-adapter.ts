@@ -151,7 +151,7 @@ export class CodexAppServerAdapter implements HarnessAdapter {
       } });
       const allowed = context.conversation.sandboxMode === "workspace-write" && (isFile || context.conversation.allowCommands);
       const legacy = method === "applyPatchApproval" || method === "execCommandApproval";
-      return { decision: legacy ? (allowed ? "approved" : { denied: { rejection: "Denied by Grokky policy" } }) : (allowed ? "accept" : "decline") };
+      return { decision: legacy ? (allowed ? "approved" : { denied: { rejection: "Denied by PuckBot policy" } }) : (allowed ? "accept" : "decline") };
     });
 
     const unsubscribeNotification = client.onNotification(async (method, paramsValue) => {

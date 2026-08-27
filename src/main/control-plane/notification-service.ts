@@ -15,7 +15,7 @@ export class NotificationService {
   snapshot(): ControlRuntimeSnapshot { return this.repository.snapshot(); }
 
   async notify(input: NotificationInput): Promise<NotificationRecord> {
-    const base = { ...structuredClone(input), id: `notification:${randomUUID()}`, ...(input.taskId ? { deepLink: `grokky://tasks/${encodeURIComponent(input.taskId)}` } : {}), createdAt: this.now() };
+    const base = { ...structuredClone(input), id: `notification:${randomUUID()}`, ...(input.taskId ? { deepLink: `puckbot://tasks/${encodeURIComponent(input.taskId)}` } : {}), createdAt: this.now() };
     const shown = await this.adapter.show(base);
     const record: NotificationRecord = { ...base, delivery: shown ? "os" : "in-app" };
     await this.repository.mutate((value) => { value.notifications.push(record); });

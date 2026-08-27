@@ -34,9 +34,10 @@ The OpenRouter key exists only in Electron's main process. The renderer sees a r
 `resolveOpenRouterCredential` checks sources in this order:
 
 1. `OPENROUTER_API_KEY` in the inherited process environment
-2. The env file path saved in Grokky settings
-3. The path in `GROKKY_OPENROUTER_ENV_FILE`
-4. `$HOME/.config/grokky/.env`
+2. The env file path saved in PuckBot settings
+3. The path in `PUCKBOT_OPENROUTER_ENV_FILE`
+4. `$HOME/.config/puckbot/.env`
+5. The legacy `GROKKY_OPENROUTER_ENV_FILE` or `$HOME/.config/grokky/.env` location
 
 An env file may use plain, quoted, or exported syntax:
 
@@ -54,7 +55,7 @@ The provider creates a typed SDK client per run:
 ```ts
 const client = new OpenRouter({
   apiKey: context.apiKey,
-  appTitle: "Grokky",
+  appTitle: "PuckBot",
   appCategories: "desktop-agent,local-agent",
   timeoutMs: 180_000,
 });
@@ -66,7 +67,7 @@ Each chat request also supplies the bearer header explicitly, uses the conversat
 
 A lead run receives:
 
-1. A Grokky system contract
+1. A PuckBot system contract
 2. Up to 40 preceding conversation messages
 3. The current user prompt
 4. Optional verified live-web findings
@@ -106,7 +107,7 @@ Tools are advertised to the model only when the selected device supports them. A
 
 ## MCP gateway
 
-OpenRouter can use enabled Codex MCP server configurations through Grokky's main-process gateway. The renderer receives only server IDs, transport labels, safe connection state, tool names, descriptions, and policy classifications. Commands, arguments, environment values, HTTP headers, bearer tokens, OAuth tokens, and raw configuration never enter React or model messages.
+OpenRouter can use enabled Codex MCP server configurations through PuckBot's main-process gateway. The renderer receives only server IDs, transport labels, safe connection state, tool names, descriptions, and policy classifications. Commands, arguments, environment values, HTTP headers, bearer tokens, OAuth tokens, and raw configuration never enter React or model messages.
 
 The gateway supports local stdio and remote Streamable HTTP transports. Remote URLs require HTTPS except for loopback test or development servers. Local processes receive the SDK's limited inherited environment plus only their configured variables. MCP protocol messages and tool output are bounded.
 
@@ -129,7 +130,7 @@ Remote OAuth uses the MCP SDK's PKCE, protected-resource discovery, authorizatio
 
 ```mermaid
 sequenceDiagram
-  participant G as Grokky
+  participant G as PuckBot
   participant O as OpenRouter model
   participant A as Access gate
   participant T as Tool target
@@ -177,7 +178,7 @@ Safeguards:
 
 ## Live web research
 
-Grokky uses OpenRouter's current server tool type, not the deprecated plugin-style web-search syntax:
+PuckBot uses OpenRouter's current server tool type, not the deprecated plugin-style web-search syntax:
 
 ```json
 {
@@ -201,7 +202,7 @@ The research stage runs only when:
 
 ### Audit requirements
 
-The request sets `tool_choice` to required. Grokky accepts the result only when all three are present:
+The request sets `tool_choice` to required. PuckBot accepts the result only when all three are present:
 
 1. At least one reported server web-search request
 2. At least one URL citation annotation
@@ -220,7 +221,7 @@ The research brief and source links are added to the lead prompt. Usage and cost
 
 ## OpenRouter crew orchestration
 
-OpenRouter does not expose Codex child threads, so Grokky provides its own equivalent orchestration layer.
+OpenRouter does not expose Codex child threads, so PuckBot provides its own equivalent orchestration layer.
 
 ```mermaid
 flowchart TB
@@ -236,7 +237,7 @@ flowchart TB
   LEAD --> FINAL[One final answer]
 ```
 
-For each agent, Grokky:
+For each agent, PuckBot:
 
 1. Generates a synthetic OpenRouter thread ID for UI correlation.
 2. Emits a real `spawn_agent` orchestration event.
@@ -251,7 +252,7 @@ The lead receives every specialist block with a role label, resolves disagreemen
 
 ## Usage aggregation
 
-Grokky normalizes:
+PuckBot normalizes:
 
 - Input tokens
 - Cached input tokens

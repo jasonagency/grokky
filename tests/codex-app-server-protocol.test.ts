@@ -52,9 +52,9 @@ describe("Codex App Server protocol client", () => {
   });
 
   test("resolves packaged macOS and Windows executables", () => {
-    expect(resolveCodexExecutable({ resourcesPath: "/Applications/Grokky.app/Contents/Resources", platform: "darwin", arch: "arm64", exists: () => true }))
+    expect(resolveCodexExecutable({ resourcesPath: "/Applications/PuckBot.app/Contents/Resources", platform: "darwin", arch: "arm64", exists: () => true }))
       .toContain("codex-darwin-arm64");
-    expect(resolveCodexExecutable({ resourcesPath: "C:\\Program Files\\Grokky\\resources", platform: "win32", arch: "x64", exists: () => true }))
+    expect(resolveCodexExecutable({ resourcesPath: "C:\\Program Files\\PuckBot\\resources", platform: "win32", arch: "x64", exists: () => true }))
       .toContain("codex-win32-x64");
   });
 });

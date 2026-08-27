@@ -18,7 +18,7 @@ function transport(host: AgentHost): HostTransport { return { capabilities: asyn
 async function eventually(check: () => boolean): Promise<void> { for (let index = 0; index < 100; index += 1) { if (check()) return; await new Promise((resolve) => setTimeout(resolve, 2)); } throw new Error("condition not reached"); }
 
 describe("offline remote host", () => {
-  test("runs a real Grokky harness adapter with host-local bounded tools", async () => {
+  test("runs a real PuckBot harness adapter with host-local bounded tools", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-host-adapter-"));
     const adapter: HarnessAdapter = {
       descriptor: {
@@ -63,7 +63,7 @@ describe("offline remote host", () => {
     ]));
   });
 
-  test("routes host-configured MCP through the Grokky gateway", async () => {
+  test("routes host-configured MCP through the PuckBot gateway", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-host-mcp-"));
     await mkdir(join(directory, ".codex"));
     await writeFile(join(directory, ".codex", "config.toml"), `[mcp_servers.fixture]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(resolve("tests/fixtures/mcp-stdio-server.mjs"))}]\nenabled = true\n`);

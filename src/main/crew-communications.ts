@@ -8,7 +8,7 @@ function runName(threadId: string, runs: AgentRun[]): string | undefined {
 }
 
 function senderName(event: OrchestrationEvent, runs: AgentRun[]): string {
-  return event.senderName || runName(event.senderThreadId, runs) || "Grokky lead";
+  return event.senderName || runName(event.senderThreadId, runs) || "PuckBot lead";
 }
 
 function receiverName(threadId: string, explicitName: string | undefined, runs: AgentRun[]): string {

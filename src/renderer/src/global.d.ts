@@ -1,8 +1,8 @@
-import type { GrokkyApi } from "../../shared/contracts";
+import type { PuckBotApi } from "../../shared/contracts";
 
 declare global {
   interface Window {
-    grokky: GrokkyApi;
+    grokky: PuckBotApi;
   }
 }
 

@@ -176,7 +176,7 @@ export function codexCrewMode(prompt: string, agents: AgentDefinition[]): CodexC
 export function crewPrompt(prompt: string, agents: AgentDefinition[], webSearchEnabled: boolean, commandsAllowed: boolean): string {
   const webRule = webSearchEnabled
     ? "Live web search is enabled. When the user asks for current or online information, actually use the web search tool and cite the sources you consulted."
-    : "Live web search is disabled for this Grokky session. Do not claim that you can browse or search the live web; explain that it can be enabled in Settings.";
+    : "Live web search is disabled for this PuckBot session. Do not claim that you can browse or search the live web; explain that it can be enabled in Settings.";
   const computerRule = commandsAllowed
     ? "The user has enabled local development commands for this session. Stay within the selected workspace and the SDK sandbox."
     : "Local development commands are not enabled for this session. You may use shell commands only for read-only inspection inside the selected workspace, such as pwd, ls, rg, sed, cat, file, and git status, diff, or log. Do not install packages, run package scripts, builds, tests, servers, or mutate files through the shell. File edits are allowed only when the SDK workspace sandbox permits them.";
@@ -202,7 +202,7 @@ export function crewPrompt(prompt: string, agents: AgentDefinition[], webSearchE
     computerRule,
     PRODUCT_WRITING_STYLE_RULE,
     "",
-    "A Grokky crew is explicitly selected for this request. You must use the collaboration tools, not simulate or merely describe delegation.",
+    "A PuckBot crew is explicitly selected for this request. You must use the collaboration tools, not simulate or merely describe delegation.",
     roster,
     orchestrationRule,
     "Use fork_turns=none for specialist spawns and put the necessary user outcome, workspace, ownership, constraints, and acceptance checks directly in each assignment. Do not copy the entire conversation into every child.",
@@ -241,7 +241,7 @@ async function handleEvent(event: ThreadEvent, context: ProviderRunContext, stat
       }
     }
     orchestration.senderName = state.agentNameByThread.get(orchestration.senderThreadId)
-      || (orchestration.senderThreadId === state.rootThreadId ? "Grokky lead" : undefined);
+      || (orchestration.senderThreadId === state.rootThreadId ? "PuckBot lead" : undefined);
     await context.onEvent({ type: "orchestration", event: orchestration });
     return;
   }

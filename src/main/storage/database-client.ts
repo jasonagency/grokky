@@ -22,7 +22,7 @@ const MINIMUM_NODE = [22, 13] as const;
 export function assertSqliteRuntime(version = process.versions.node): void {
   const [major = 0, minor = 0] = version.split(".").map((value) => Number.parseInt(value, 10));
   if (major < MINIMUM_NODE[0] || (major === MINIMUM_NODE[0] && minor < MINIMUM_NODE[1])) {
-    throw new Error(`Grokky requires Node.js 22.13 or newer for the built-in SQLite store; found ${version}.`);
+    throw new Error(`PuckBot requires Node.js 22.13 or newer for the built-in SQLite store; found ${version}.`);
   }
 }
 

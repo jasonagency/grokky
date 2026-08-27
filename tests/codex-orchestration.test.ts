@@ -121,7 +121,7 @@ describe("Codex Sol rollout collaboration mapping", () => {
       operationId: "call_1",
       tool: "spawn_agent",
       senderThreadId: "root_1",
-      senderName: "Grokky lead",
+      senderName: "PuckBot lead",
       receiverThreads: [{ threadId: "child_1", name: "explorer", status: "running" }],
       prompt: "Trace the renderer and report evidence.",
       status: "running",
@@ -140,7 +140,7 @@ describe("Codex Sol rollout collaboration mapping", () => {
       operationId: "message_1",
       tool: "wait",
       senderThreadId: "root_1",
-      senderName: "Grokky lead",
+      senderName: "PuckBot lead",
       receiverThreads: [{ threadId: "child_1", name: "explorer", status: "completed", message: "Found the renderer." }],
       status: "completed",
     }]);

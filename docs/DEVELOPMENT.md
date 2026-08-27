@@ -96,7 +96,7 @@ Live integration tests are skipped unless their explicit environment flag is set
 Every new renderer-to-main action requires:
 
 1. A named channel in `IPC`
-2. A typed method in `GrokkyApi`
+2. A typed method in `PuckBotApi`
 3. A preload method
 4. Runtime validation in the main IPC handler
 5. A controller or service method

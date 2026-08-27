@@ -26,7 +26,7 @@ for (const pathname of candidates) {
 }
 if (!apiKey) throw new Error("No OpenRouter credential was found for the smoke test");
 
-const client = new OpenRouter({ apiKey, appTitle: "Grokky smoke test", timeoutMs: 120_000 });
+const client = new OpenRouter({ apiKey, appTitle: "PuckBot smoke test", timeoutMs: 120_000 });
 const response = await client.chat.send({
   chatRequest: {
     model: process.env.GROKKY_OPENROUTER_SMOKE_MODEL || "google/gemini-3.1-flash-lite",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const workspace = await mkdtemp(join(tmpdir(), "grokky-codex-smoke-"));
-await writeFile(join(workspace, "README.md"), "# Grokky smoke workspace\n");
+await writeFile(join(workspace, "README.md"), "# PuckBot smoke workspace\n");
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 180_000);
 

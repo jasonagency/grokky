@@ -72,7 +72,7 @@ class StoredOAuthProvider implements OAuthClientProvider {
   get redirectUrl(): string { return this.callbackUrl; }
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "Grokky MCP Gateway",
+      client_name: "PuckBot MCP Gateway",
       redirect_uris: [this.callbackUrl],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

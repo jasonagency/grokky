@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppSnapshot, AppSettings, ConversationPatch, GrokkyApi } from "../shared/contracts";
+import type { AppSnapshot, AppSettings, ConversationPatch, PuckBotApi } from "../shared/contracts";
 import type { ProjectionChange } from "../shared/control-plane-contracts";
 import { IPC } from "../shared/contracts";
 import { userFacingError } from "../shared/errors";
@@ -18,11 +18,11 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   try {
     return await ipcRenderer.invoke(channel, ...args) as T;
   } catch (error) {
-    throw new Error(userFacingError(error, "Grokky could not complete that request"));
+    throw new Error(userFacingError(error, "PuckBot could not complete that request"));
   }
 }
 
-const api: GrokkyApi = {
+const api: PuckBotApi = {
   getSnapshot: () => invoke(IPC.snapshotGet),
   createConversation: () => invoke(IPC.conversationCreate),
   setActiveConversation: (conversationId) => invoke(IPC.conversationActivate, conversationId),

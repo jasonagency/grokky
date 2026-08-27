@@ -1,5 +1,5 @@
 {
-  "name": "grokky",
+  "name": "puckbot",
   "version": "0.1.2",
   "description": "A local-first multi-harness AI workspace powered by Codex, OpenRouter, and Pi.",
   "main": "./out/main/index.js",
@@ -73,8 +73,8 @@
     "vitest": "^4.1.11"
   },
   "build": {
-    "appId": "com.promptadvisers.grokky",
-    "productName": "Grokky",
+    "appId": "com.jasonagency.puckbot",
+    "productName": "PuckBot",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -110,7 +110,7 @@
       ]
     },
     "dmg": {
-      "title": "Grokky"
+      "title": "PuckBot"
     },
     "win": {
       "icon": "build/icon-mascot.png",

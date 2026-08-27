@@ -12,7 +12,7 @@ function event(patch: Partial<OrchestrationEvent>): OrchestrationEvent {
     operationId: "operation",
     tool: "spawn_agent",
     senderThreadId: "lead",
-    senderName: "Grokky lead",
+    senderName: "PuckBot lead",
     receiverThreads: [],
     status: "completed",
     ...patch,
@@ -28,7 +28,7 @@ describe("crew communication ledger", () => {
 
     expect(entries).toEqual([expect.objectContaining({
       kind: "assignment",
-      senderName: "Grokky lead",
+      senderName: "PuckBot lead",
       receiverName: "explorer",
       content: "Trace the renderer and cite the relevant component.",
       createdAt: 20,
@@ -46,7 +46,7 @@ describe("crew communication ledger", () => {
       senderThreadId: "child-a",
       senderName: "explorer",
       receiverThreadId: "lead",
-      receiverName: "Grokky lead",
+      receiverName: "PuckBot lead",
       content: "The state mapper drops keyed completion values.",
     })]);
   });

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="build/icon-mascot.png" width="168" alt="Grokky mascot" />
+  <img src="build/icon-mascot.png" width="168" alt="PuckBot mascot" />
 </p>
 
-<h1 align="center">Grokky</h1>
+<h1 align="center">PuckBot</h1>
 
 <p align="center">
   <strong>A local-first desktop cockpit for Codex, OpenRouter, Pi, and coordinated AI crews.</strong>
@@ -18,7 +18,7 @@
   <img alt="License" src="https://img.shields.io/badge/license-UNLICENSED-a8d84e?style=flat-square" />
 </p>
 
-Grokky turns a folder on your computer into a visual AI workspace. Pick Codex App Server, OpenRouter, or the native Pi SDK, define the access boundary, and watch work unfold as messages, tool activity, specialist handoffs, approvals, and usage.
+PuckBot turns a folder on your computer into a visual AI workspace. Pick Codex App Server, OpenRouter, or the native Pi SDK, define the access boundary, and watch work unfold as messages, tool activity, specialist handoffs, approvals, and usage.
 
 The interface is only the cockpit. Credentials, model processes, files, commands, native permissions, and remote-computer tokens stay behind Electron's trusted main-process boundary.
 
@@ -49,7 +49,7 @@ Current application version: **0.1.2**
 
 ```mermaid
 flowchart LR
-  U[You] --> UI[Grokky cockpit]
+  U[You] --> UI[PuckBot cockpit]
   UI --> B[Typed IPC bridge]
   B --> C[Main controller]
 
@@ -80,7 +80,7 @@ Most AI desktop apps collapse three different concerns into one opaque chat box:
 2. The tools and permissions
 3. The orchestration strategy
 
-Grokky keeps them visible and independently configurable. A conversation records which provider, model, reasoning level, workspace, sandbox, command policy, and crew produced the result. The same React interface can drive a native Codex thread or an OpenRouter tool loop without pretending those runtimes work the same way.
+PuckBot keeps them visible and independently configurable. A conversation records which provider, model, reasoning level, workspace, sandbox, command policy, and crew produced the result. The same React interface can drive a native Codex thread or an OpenRouter tool loop without pretending those runtimes work the same way.
 
 ## What is already built
 
@@ -114,16 +114,16 @@ The runtimes intentionally share a UI contract, not an implementation.
 | Capability | Codex | OpenRouter |
 | --- | :---: | :---: |
 | Persistent conversation context | Native thread resume | Recent message history |
-| Streaming activity | SDK thread events | Grokky tool-loop events |
+| Streaming activity | SDK thread events | PuckBot tool-loop events |
 | Multi-agent specialists | Native child threads | Parallel read-only model loops |
 | Final coordinator | Codex parent thread | One lead model after specialists finish |
-| Workspace tools | Codex sandbox and SDK tools | Grokky's bounded functions |
+| Workspace tools | Codex sandbox and SDK tools | PuckBot's bounded functions |
 | Skills | Yes | Not yet |
-| MCP servers | Yes | Yes, through Grokky's audited gateway |
+| MCP servers | Yes | Yes, through PuckBot's audited gateway |
 | Connector plugins | Yes | Not yet |
 | Live web research | Codex live search | OpenRouter server web-search tool |
-| Screen input | Native SDK feature when always allowed | Grokky screenshot tool with approval on macOS |
-| UI automation | Native SDK feature when always allowed | Grokky native tools with approval on macOS |
+| Screen input | Native SDK feature when always allowed | PuckBot screenshot tool with approval on macOS |
+| UI automation | Native SDK feature when always allowed | PuckBot native tools with approval on macOS |
 
 ## Request lifecycle
 
@@ -183,15 +183,15 @@ The tag-triggered release workflow signs both native packages, notarizes and sta
 
 ### macOS installation
 
-1. Open `Grokky-<version>-mac-arm64.dmg`.
-2. Copy `Grokky.app` into `/Applications`.
-3. Launch Grokky from Applications.
+1. Open `PuckBot-<version>-mac-arm64.dmg`.
+2. Copy `PuckBot.app` into `/Applications`.
+3. Launch PuckBot from Applications.
 
 ### Windows installation
 
-1. Run `Grokky-<version>-win-x64.exe`.
+1. Run `PuckBot-<version>-win-x64.exe`.
 2. Choose the installation directory when prompted.
-3. Launch Grokky from the Start menu or the selected directory.
+3. Launch PuckBot from the Start menu or the selected directory.
 
 > [!WARNING]
 > Do not install an operating-system warning exception for an unsigned development artifact. Distribution releases must pass the signed release workflow.
@@ -207,7 +207,7 @@ The tag-triggered release workflow signs both native packages, notarizes and sta
 7. Optionally select a crew or create agents with distinct roles and mascots.
 8. Send the outcome you want. Activity, approvals, specialist state, and reports appear in the conversation.
 
-New installs start in **No project**, an isolated `~/.grokky/no-project` scratch folder. Project work is rejected before provider dispatch until a real folder is selected, and localhost or package-command work is rejected until **Full access** is selected. Grokky never treats the user's home directory as an implicit project root.
+New installs start in **No project**, an isolated `~/.grokky/no-project` scratch folder. Project work is rejected before provider dispatch until a real folder is selected, and localhost or package-command work is rejected until **Full access** is selected. PuckBot never treats the user's home directory as an implicit project root.
 
 ## Development quick start
 
@@ -250,7 +250,7 @@ npm run smoke:electron
 
 ## Codex SDK setup
 
-Grokky uses the official [`@openai/codex-sdk`](https://www.npmjs.com/package/@openai/codex-sdk) in Electron's main process. The SDK controls a local Codex agent, keeps model execution out of the renderer, and supports starting, continuing, and resuming threads. See the [official Codex SDK guide](https://learn.chatgpt.com/docs/codex-sdk).
+PuckBot uses the official [`@openai/codex-sdk`](https://www.npmjs.com/package/@openai/codex-sdk) in Electron's main process. The SDK controls a local Codex agent, keeps model execution out of the renderer, and supports starting, continuing, and resuming threads. See the [official Codex SDK guide](https://learn.chatgpt.com/docs/codex-sdk).
 
 ### 1. Sign in once
 
@@ -260,11 +260,11 @@ Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), open a termin
 codex
 ```
 
-Complete the CLI's sign-in flow the first time it opens. Grokky checks the normal Codex auth location, or the location selected by `CODEX_HOME`. It does not copy session material into this repository or its conversation database.
+Complete the CLI's sign-in flow the first time it opens. PuckBot checks the normal Codex auth location, or the location selected by `CODEX_HOME`. It does not copy session material into this repository or its conversation database.
 
 ### 2. Start or resume a thread
 
-The provider creates one SDK client per run, applies Grokky's feature settings, then chooses the thread operation from the conversation state:
+The provider creates one SDK client per run, applies PuckBot's feature settings, then chooses the thread operation from the conversation state:
 
 ```ts
 const codex = new Codex({ config });
@@ -276,13 +276,13 @@ const thread = conversation.threadId
 const { events } = await thread.runStreamed(prompt, { signal });
 ```
 
-When the SDK emits `thread.started`, Grokky stores the thread ID. The next turn resumes the same thread with the active model, reasoning, workspace, sandbox, network, and search options.
+When the SDK emits `thread.started`, PuckBot stores the thread ID. The next turn resumes the same thread with the active model, reasoning, workspace, sandbox, network, and search options.
 
 ### 3. Normalize SDK events
 
 The provider maps SDK items into renderer-safe contracts:
 
-| SDK event or item | Grokky representation |
+| SDK event or item | PuckBot representation |
 | --- | --- |
 | `thread.started` | Persisted thread ID |
 | `reasoning` | Reasoning activity |
@@ -304,7 +304,7 @@ Full implementation notes: [docs/CODEX-SDK.md](docs/CODEX-SDK.md)
 
 ## OpenRouter setup
 
-Grokky uses the official [`@openrouter/sdk`](https://www.npmjs.com/package/@openrouter/sdk) for typed chat calls and a direct OpenRouter request for the current server-side web-search tool.
+PuckBot uses the official [`@openrouter/sdk`](https://www.npmjs.com/package/@openrouter/sdk) for typed chat calls and a direct OpenRouter request for the current server-side web-search tool.
 
 ### 1. Supply a key outside the renderer
 
@@ -312,8 +312,9 @@ Use any one of these sources, in priority order:
 
 1. `OPENROUTER_API_KEY` in the launching process
 2. An env file chosen in **Settings → Session → OpenRouter credential**
-3. `GROKKY_OPENROUTER_ENV_FILE` pointing to an env file
-4. `$HOME/.config/grokky/.env`
+3. `PUCKBOT_OPENROUTER_ENV_FILE` pointing to an env file
+4. `$HOME/.config/puckbot/.env`
+5. The legacy `GROKKY_OPENROUTER_ENV_FILE` or `$HOME/.config/grokky/.env` location
 
 Example local file:
 
@@ -328,12 +329,14 @@ Only the selected file path can be persisted. The key value is resolved in the m
 | Variable | Purpose | Required |
 | --- | --- | :---: |
 | `OPENROUTER_API_KEY` | Supplies the OpenRouter key to the main process | No |
-| `GROKKY_OPENROUTER_ENV_FILE` | Selects an env file containing `OPENROUTER_API_KEY` | No |
+| `PUCKBOT_OPENROUTER_ENV_FILE` | Selects an env file containing `OPENROUTER_API_KEY` | No |
 | `CODEX_HOME` | Uses a non-default Codex configuration and authentication directory | No |
-| `GROKKY_USER_DATA_PATH` | Overrides Electron user data for isolated development or testing | No |
+| `PUCKBOT_USER_DATA_PATH` | Overrides Electron user data for isolated development or testing | No |
 | `GROKKY_CODEX_SMOKE_MODEL` | Overrides the model used by Codex live smoke tests | No |
 | `GROKKY_OPENROUTER_SMOKE_MODEL` | Overrides the model used by OpenRouter live smoke tests | No |
 | `GROKKY_DEBUG_EVENTS=1` | Prints bounded provider events during development | No |
+
+The previous `GROKKY_OPENROUTER_ENV_FILE` and `GROKKY_USER_DATA_PATH` names remain supported as compatibility aliases. Developer-only smoke variables retain their existing names for now so established automation keeps working.
 
 Do not commit local env files. The repository hygiene check rejects credential-shaped keys and private machine paths.
 
@@ -356,7 +359,7 @@ The tool catalog can include file listing, literal search, file reads, exact edi
 
 ### 3. Use auditable live web search
 
-When web search is enabled and the prompt calls for current information, Grokky invokes OpenRouter's current server tool:
+When web search is enabled and the prompt calls for current information, PuckBot invokes OpenRouter's current server tool:
 
 ```json
 {
@@ -371,7 +374,7 @@ When web search is enabled and the prompt calls for current information, Grokky 
 }
 ```
 
-The research step must return evidence that a server search ran plus source URLs. Grokky retries once if either is absent, records the sources in activity, and feeds the verified brief to the final answer. This follows OpenRouter's [server tools](https://openrouter.ai/docs/guides/features/server-tools/overview) and [web search](https://openrouter.ai/docs/guides/features/server-tools/web-search) documentation.
+The research step must return evidence that a server search ran plus source URLs. PuckBot retries once if either is absent, records the sources in activity, and feeds the verified brief to the final answer. This follows OpenRouter's [server tools](https://openrouter.ai/docs/guides/features/server-tools/overview) and [web search](https://openrouter.ai/docs/guides/features/server-tools/web-search) documentation.
 
 Full implementation notes: [docs/OPENROUTER.md](docs/OPENROUTER.md)
 
@@ -397,14 +400,14 @@ flowchart TB
   OF --> UI
 ```
 
-For Codex, Grokky enables the SDK's multi-agent features and translates confirmed collaboration evidence into named specialist cards plus an inspectable Messages tab. Legacy runtimes expose that evidence as SDK collaboration items. Sol's v2 protocol currently omits child starts and reports from the public stream, so Grokky tails only the active root thread's local Codex JSONL record and maps `SubAgentActivity` starts plus plaintext child `FINAL_ANSWER` payloads. It ignores encrypted intermediate content. The Messages tab shows confirmed assignments, direct messages, specialist reports, sender and receiver routing, timestamps, and exceptional delivery states in chronological speaker groups without exposing raw orchestration tool names. For OpenRouter, every specialist gets its own prompt, optional model, optional reasoning level, developer instructions, and read-only tool catalog. All specialists run concurrently. One lead runs only after they finish, owns any allowed writes, and produces the user-facing result.
+For Codex, PuckBot enables the SDK's multi-agent features and translates confirmed collaboration evidence into named specialist cards plus an inspectable Messages tab. Legacy runtimes expose that evidence as SDK collaboration items. Sol's v2 protocol currently omits child starts and reports from the public stream, so PuckBot tails only the active root thread's local Codex JSONL record and maps `SubAgentActivity` starts plus plaintext child `FINAL_ANSWER` payloads. It ignores encrypted intermediate content. The Messages tab shows confirmed assignments, direct messages, specialist reports, sender and receiver routing, timestamps, and exceptional delivery states in chronological speaker groups without exposing raw orchestration tool names. For OpenRouter, every specialist gets its own prompt, optional model, optional reasoning level, developer instructions, and read-only tool catalog. All specialists run concurrently. One lead runs only after they finish, owns any allowed writes, and produces the user-facing result.
 
 Agent definitions live in normal Codex TOML locations:
 
 - Personal: `$HOME/.codex/agents/*.toml`
 - Project: `<workspace>/.codex/agents/*.toml`
 
-Grokky adds a comment-only `grokky_icon` metadata field so the interface can assign a different mascot color without changing the agent contract.
+PuckBot adds a comment-only `grokky_icon` metadata field so the interface can assign a different mascot color without changing the agent contract.
 
 ## Skills, MCP servers, and connectors
 
@@ -414,7 +417,7 @@ The capability manager reads the active Codex configuration and presents three d
 - **MCP servers** discovers `[mcp_servers.*]` tables and preserves whether each server is local, remote, or otherwise configured.
 - **Connectors** discovers `[plugins.*]` entries.
 
-Toggles update only the relevant `enabled` field or skill config block in `$HOME/.codex/config.toml`. Writes are atomic and preserve unrelated configuration. Skills and connector plugins remain native Codex capabilities. OpenRouter can use enabled MCP servers through Grokky's audited main-process gateway, but it does not serialize Codex skills or connector runtimes into model prompts.
+Toggles update only the relevant `enabled` field or skill config block in `$HOME/.codex/config.toml`. Writes are atomic and preserve unrelated configuration. Skills and connector plugins remain native Codex capabilities. OpenRouter can use enabled MCP servers through PuckBot's audited main-process gateway, but it does not serialize Codex skills or connector runtimes into model prompts.
 
 ## Computer access model
 
@@ -445,7 +448,7 @@ Read the complete threat model and trust boundaries in [docs/SECURITY.md](docs/S
 
 ## Pair a private computer
 
-The runner can operate in two modes. Its default compatibility mode exposes only bounded workspace tools and has no model credential. `--agent-host` additionally enables durable Codex, OpenRouter, and Pi jobs using credentials that already exist on that computer. Neither mode receives Grokky's conversation database.
+The runner can operate in two modes. Its default compatibility mode exposes only bounded workspace tools and has no model credential. `--agent-host` additionally enables durable Codex, OpenRouter, and Pi jobs using credentials that already exist on that computer. Neither mode receives PuckBot's conversation database.
 
 On the computer to control:
 
@@ -462,14 +465,14 @@ npm run runner -- \
   --allow-commands
 ```
 
-The runner prints a one-time six-digit pairing code. In Grokky, open **Settings → Computer access**, enter the private endpoint and code, then select the device.
+The runner prints a one-time six-digit pairing code. In PuckBot, open **Settings → Computer access**, enter the private endpoint and code, then select the device.
 
-The host advertises only harnesses whose local credential and runtime checks pass. Add `--allow-write` only if it may accept workspace-write requests, and add `--allow-commands` only if it may accept the bounded command allowlist. Grokky's task policy still narrows both flags. Host jobs spool by default at `$HOME/.grokky-runner/agent-host.json`; use `--agent-state` to place that private file elsewhere.
+The host advertises only harnesses whose local credential and runtime checks pass. Add `--allow-write` only if it may accept workspace-write requests, and add `--allow-commands` only if it may accept the bounded command allowlist. PuckBot's task policy still narrows both flags. Host jobs spool by default at `$HOME/.grokky-runner/agent-host.json`; use `--agent-state` to place that private file elsewhere.
 
 > [!WARNING]
 > Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in compatibility runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
 
-The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, versioned routine graphs, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. Remote routines are registered on the selected host before their fire time, so the host can start dependency-aware work while Grokky and the desktop are closed. Reconnecting advances a per-host durable event cursor, restores unattended activity to the trace, emits terminal or approval notifications, and settles ordinary remote task attempts even after the desktop lease expires. Provider credentials remain on the host, and the desktop retains only its revocable encrypted pairing credential.
+The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, versioned routine graphs, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. Remote routines are registered on the selected host before their fire time, so the host can start dependency-aware work while PuckBot and the desktop are closed. Reconnecting advances a per-host durable event cursor, restores unattended activity to the trace, emits terminal or approval notifications, and settles ordinary remote task attempts even after the desktop lease expires. Provider credentials remain on the host, and the desktop retains only its revocable encrypted pairing credential.
 
 Browser screens use an operator-started Chromium instance whose DevTools listener is bound to loopback. Start Chromium with one persistent `--user-data-dir` and `--remote-debugging-port`, then pass `--browser-cdp http://127.0.0.1:<port>`. The broker shares that approved login profile while leasing a distinct page to each agent. On Linux, `--desktop-displays :21,:22` leases explicitly provisioned non-root X displays and requires `gnome-screenshot` plus `xdotool`; it never creates or runs a desktop as root.
 
@@ -477,26 +480,26 @@ Agent computer sessions add independently addressed browser pages or non-root de
 
 ## Persistence and chat deletion
 
-Grokky stores state in Electron's per-user application-data directory. The primary database is:
+PuckBot stores state in Electron's per-user application-data directory. The primary database is:
 
 ```text
-macOS:  $HOME/Library/Application Support/Grokky/conversations.sqlite3
-Windows: %APPDATA%\Grokky\conversations.sqlite3
+macOS:  $HOME/Library/Application Support/PuckBot/conversations.sqlite3
+Windows: %APPDATA%\PuckBot\conversations.sqlite3
 ```
 
 The database contains conversations, messages, activity summaries, settings, usage, harness attempt and session references, access policy, recent audit entries, and encrypted remote-runner tokens. A dedicated worker owns the SQLite connection, applies forward-only migrations, and serializes writes. Run activity is also captured as ordered, append-only domain events with rebuildable conversation projections. Large event content becomes a bounded, content-addressed local artifact. The database file uses private filesystem permissions and write-ahead logging.
 
-On first launch after this migration, Grokky imports `conversations.json` once, preserves it unchanged, and creates `conversations.json.legacy-v2-backup`. The SQLite import marker prevents a later launch from importing the same records again.
+On first launch after this migration, PuckBot imports `conversations.json` once, preserves it unchanged, and creates `conversations.json.legacy-v2-backup`. The SQLite import marker prevents a later launch from importing the same records again.
 
-Before opening an existing SQLite database, Grokky writes `conversations.sqlite3.pre-migration-backup` with private permissions. A failed migration leaves the original transaction intact and reports that recovery path instead of starting with empty state.
+Before opening an existing SQLite database, PuckBot writes `conversations.sqlite3.pre-migration-backup` with private permissions. A failed migration leaves the original transaction intact and reports that recovery path instead of starting with empty state.
 
 Deleting a chat from the sidebar or toolbar removes it from that local state and cancels an active run first. Deleting local metadata does not delete a provider's remote records, Codex home data, agent TOML files, or workspace files.
 
-To back up Grokky, close the app and copy `conversations.sqlite3` plus any retained legacy backup to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
+To back up PuckBot, close the app and copy `conversations.sqlite3` plus any retained legacy backup to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
 
 ## Updating
 
-Signed packaged builds check the selected stable or beta channel automatically. Grokky never downloads or restarts without an operator action. Before presenting an installer for restart it requires a newer matching-channel version, HTTPS metadata, a valid SHA-512 digest, and the platform's application-owner signature validation.
+Signed packaged builds check the selected stable or beta channel automatically. PuckBot never downloads or restarts without an operator action. Before presenting an installer for restart it requires a newer matching-channel version, HTTPS metadata, a valid SHA-512 digest, and the platform's application-owner signature validation.
 
 An update may download while work continues. Restart stays blocked while a local conversation or task lease is active, an integration is unresolved, an approval is pending, database initialization is incomplete, or the selected remote host has not reconciled. The banner names every blocker and preserves the open conversation, composer, and task context.
 
@@ -569,15 +572,15 @@ CI performs this inspection before uploading either installer. Release CI additi
 
 ### Codex shows “sign-in missing”
 
-Run `codex` in a terminal and complete the sign-in flow, then refresh provider status in Grokky. If you use `CODEX_HOME`, confirm the app and CLI point to the same directory.
+Run `codex` in a terminal and complete the sign-in flow, then refresh provider status in PuckBot. If you use `CODEX_HOME`, confirm the app and CLI point to the same directory.
 
 ### OpenRouter shows “key missing”
 
-Open **Settings → Session → OpenRouter credential** and choose a readable env file containing exactly one `OPENROUTER_API_KEY=...` entry. You can also launch Grokky with `OPENROUTER_API_KEY` or `GROKKY_OPENROUTER_ENV_FILE` set.
+Open **Settings → Session → OpenRouter credential** and choose a readable env file containing exactly one `OPENROUTER_API_KEY=...` entry. You can also launch PuckBot with `OPENROUTER_API_KEY` or `PUCKBOT_OPENROUTER_ENV_FILE` set; the legacy `GROKKY_OPENROUTER_ENV_FILE` alias is still accepted.
 
 ### Web research does not run
 
-Confirm live web search is enabled for the session. Codex uses its native search capability. OpenRouter uses its server-side web-search tool and requires a valid OpenRouter key and a compatible model. Grokky records the search activity and source URLs when research runs.
+Confirm live web search is enabled for the session. Codex uses its native search capability. OpenRouter uses its server-side web-search tool and requires a valid OpenRouter key and a compatible model. PuckBot records the search activity and source URLs when research runs.
 
 ### Skills, MCP servers, or connectors are missing
 
@@ -602,7 +605,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 ## Design principles
 
 1. **The renderer is untrusted.** It cannot read credentials, import Node, spawn processes, or touch the filesystem directly.
-2. **Provider behavior must be honest.** The UI distinguishes native Codex behavior from Grokky-owned OpenRouter orchestration.
+2. **Provider behavior must be honest.** The UI distinguishes native Codex behavior from PuckBot-owned OpenRouter orchestration.
 3. **Delegation must be observable.** A crew is not shown as working until a real child or specialist run exists.
 4. **Permission is layered.** Workspace mode, chat command setting, capability policy, native OS permission, and remote-runner flags all narrow access.
 5. **State is local and inspectable.** Conversations are not hidden in a bundled cloud database.
@@ -630,7 +633,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 
 ## Independent implementation notice
 
-Grokky is an independent application built against public SDKs and documented provider contracts. It does not include proprietary source code, assets, protocol definitions, internal packages, or installers from another commercial desktop agent. Product inspiration and behavioral research do not imply affiliation, endorsement, or compatibility certification.
+PuckBot is an independent application built against public SDKs and documented provider contracts. It does not include proprietary source code, assets, protocol definitions, internal packages, or installers from another commercial desktop agent. Product inspiration and behavioral research do not imply affiliation, endorsement, or compatibility certification.
 
 ## Ownership
 

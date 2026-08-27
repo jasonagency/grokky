@@ -139,7 +139,7 @@ describe("controller task dispatch", () => {
     const runner = await startRunnerServer({
       root: remoteRoot, statePath: join(remoteRoot, "runner.json"), host: "127.0.0.1", port: 0,
       agentHostFactory: (credential, deviceId) => {
-        const registry = new HostHarnessRegistry(); registry.register("codex-sdk", async () => { await hostMayFinish; return "finished while Grokky was closed"; });
+        const registry = new HostHarnessRegistry(); registry.register("codex-sdk", async () => { await hostMayFinish; return "finished while PuckBot was closed"; });
         agentHost = new AgentHost(deviceId, new HostStore(join(remoteRoot, "host.json")), registry, credential); return agentHost;
       },
     });
@@ -163,7 +163,7 @@ describe("controller task dispatch", () => {
     try {
       await controller2.initialize();
       await waitFor(() => controller2.snapshot().taskGraph.tasks[0]?.status === "succeeded");
-      expect(controller2.snapshot().taskGraph.tasks[0]?.outcome?.summary).toBe("finished while Grokky was closed");
+      expect(controller2.snapshot().taskGraph.tasks[0]?.outcome?.summary).toBe("finished while PuckBot was closed");
       expect(agentHost.snapshot().jobs).toHaveLength(1);
       const eventIds = (await database2.listEvents()).map((value) => (JSON.parse(value) as { id: string }).id);
       expect(new Set(eventIds).size).toBe(eventIds.length);

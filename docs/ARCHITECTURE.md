@@ -1,4 +1,4 @@
-# Grokky architecture
+# PuckBot architecture
 
 This document describes the implementation that ships in this repository. It separates product behavior from provider-specific behavior so future work can extend one layer without weakening another.
 
@@ -6,7 +6,7 @@ This document describes the implementation that ships in this repository. It sep
 
 ```mermaid
 flowchart TB
-  USER[User] --> APP[Grokky desktop app]
+  USER[User] --> APP[PuckBot desktop app]
   APP --> WORKSPACE[Selected local workspace]
   APP --> CODEX[Codex SDK and local Codex runtime]
   APP --> OPENROUTER[OpenRouter API]
@@ -19,7 +19,7 @@ flowchart TB
   RUNNER --> REMOTEWORKSPACE[Bounded remote workspace]
 ```
 
-Grokky owns the desktop interface, local persistence, typed boundary, provider normalization, OpenRouter tool loop, access policy, and remote runner. Codex owns its native thread runtime, authentication, SDK tools, skills, MCP execution, connectors, and child-thread implementation. OpenRouter owns model routing and server-side tools.
+PuckBot owns the desktop interface, local persistence, typed boundary, provider normalization, OpenRouter tool loop, access policy, and remote runner. Codex owns its native thread runtime, authentication, SDK tools, skills, MCP execution, connectors, and child-thread implementation. OpenRouter owns model routing and server-side tools.
 
 ## Electron trust boundary
 
@@ -65,7 +65,7 @@ The renderer runs with:
 - `contextIsolation: true`
 - `nodeIntegration: false`
 - `sandbox: true`
-- A preload exposing only the `GrokkyApi` contract
+- A preload exposing only the `PuckBotApi` contract
 - External navigation blocked and web links opened through a validated main-process handler
 
 The renderer receives complete application snapshots. It never receives a provider key, runner bearer token, Codex auth record, unrestricted filesystem handle, shell handle, or Node primitive.
@@ -210,7 +210,7 @@ flowchart LR
 
 Codex options are derived per conversation. They include working directory, model, reasoning, sandbox mode, network access, web search, and cancellation. Feature configuration is derived per application setting. It includes multi-agent limits, subagent defaults, connectors, browser use, computer use, skills, and workspace dependency discovery.
 
-The SDK receives a precise crew contract when agents are selected. Grokky observes real collaboration items and does not invent child state from assistant prose. Legacy collaboration items and Sol v2's active local rollout records normalize into the same contract. Assignments and reports are retained as sender-to-receiver records, which lets the renderer show actual lead and specialist traffic instead of a generic loading state.
+The SDK receives a precise crew contract when agents are selected. PuckBot observes real collaboration items and does not invent child state from assistant prose. Legacy collaboration items and Sol v2's active local rollout records normalize into the same contract. Assignments and reports are retained as sender-to-receiver records, which lets the renderer show actual lead and specialist traffic instead of a generic loading state.
 
 See [CODEX-SDK.md](CODEX-SDK.md).
 
@@ -299,7 +299,7 @@ No single UI toggle can widen all layers.
 ```mermaid
 sequenceDiagram
   actor U as User
-  participant G as Grokky main process
+  participant G as PuckBot main process
   participant R as Private runner
   participant K as Electron safe storage
 
@@ -331,9 +331,9 @@ Runner endpoints:
 | `POST /host/routines` | Bearer token | Idempotently register or advance a versioned routine graph |
 | `POST /host/screens/*` | Bearer token | Lease, capture, control, and revoke agent screens |
 
-The runner's disk state uses mode `0600`. Grokky stores only an Electron `safeStorage` encrypted form of the bearer token. HTTP transport is designed for loopback or an encrypted private overlay network, not direct public exposure.
+The runner's disk state uses mode `0600`. PuckBot stores only an Electron `safeStorage` encrypted form of the bearer token. HTTP transport is designed for loopback or an encrypted private overlay network, not direct public exposure.
 
-With `--agent-host`, the runner constructs the same Codex App Server, Codex SDK fallback, OpenRouter, and Pi registry used by the desktop, but resolves readiness and credentials locally. Grokky-controlled workspace tools remain bounded by the runner root and startup flags. The protocol uses independently versioned job and routine submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. The host scheduler persists routine definitions, occurrence keys, graph dependencies, and job events before execution; this lets due work start without a desktop process. Closing the desktop detaches monitoring without failing the attempt. Reconnecting replays from the paired device's durable cursor, records unattended routine activity, and settles the original ordinary task. Submission and occurrence IDs are stable, so reconnecting or retrying does not create duplicate work.
+With `--agent-host`, the runner constructs the same Codex App Server, Codex SDK fallback, OpenRouter, and Pi registry used by the desktop, but resolves readiness and credentials locally. PuckBot-controlled workspace tools remain bounded by the runner root and startup flags. The protocol uses independently versioned job and routine submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. The host scheduler persists routine definitions, occurrence keys, graph dependencies, and job events before execution; this lets due work start without a desktop process. Closing the desktop detaches monitoring without failing the attempt. Reconnecting replays from the paired device's durable cursor, records unattended routine activity, and settles the original ordinary task. Submission and occurrence IDs are stable, so reconnecting or retrying does not create duplicate work.
 
 Browser screen provisioning connects to a loopback Chrome DevTools endpoint and opens separate pages in one persistent browser profile. Linux desktop provisioning leases only the explicit non-root X displays named at startup. Both flow through `ScreenSessionManager`, so screenshots, input, takeover, locks, expiration, audit history, and shared-trust labels use one contract.
 
@@ -377,7 +377,7 @@ erDiagram
 
 Persisted state intentionally includes user content and may be sensitive, but it lives outside the repository under Electron's per-user data directory. The database file uses mode `0600`, WAL journaling, and a single worker-owned connection. A retained legacy JSON file is read only during the idempotent first import.
 
-Grokky does not persist:
+PuckBot does not persist:
 
 - The OpenRouter key value
 - Codex authentication contents

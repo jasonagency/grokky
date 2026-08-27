@@ -19,7 +19,7 @@ export async function createRepository(directories: string[]): Promise<string> {
   directories.push(directory);
   await git(directory, ["init", "-b", "main"]);
   await git(directory, ["config", "user.email", "tests@grokky.local"]);
-  await git(directory, ["config", "user.name", "Grokky Tests"]);
+  await git(directory, ["config", "user.name", "PuckBot Tests"]);
   await writeFile(join(directory, "README.md"), "base\n");
   await commitAll(directory, "initial");
   return directory;

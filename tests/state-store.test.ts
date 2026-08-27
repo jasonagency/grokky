@@ -93,7 +93,7 @@ describe("StateStore", () => {
     }));
     const store = new StateStore(pathname, directory);
     const state = await store.load();
-    expect(state.conversations[0]).toMatchObject({ projectMode: "none", workingDirectory: noProjectDirectory(directory), selectedAgentIds: [], agentRuns: [{ name: "tester", status: "stopped" }], crewCommunications: [{ content: "Stored report" }], activities: [] });
+    expect(state.conversations[0]).toMatchObject({ projectMode: "none", workingDirectory: noProjectDirectory(directory), selectedAgentIds: [], agentRuns: [{ name: "tester", status: "stopped" }], crewCommunications: [{ receiverName: "PuckBot lead", content: "Stored report" }], activities: [] });
     expect(state.settings).toMatchObject({ defaultWorkingDirectory: noProjectDirectory(directory), recentWorkingDirectories: [], accentPalette: "lime", maxAgentThreads: 8, defaultSubagentModel: "", defaultSubagentReasoning: "", interruptAgentMessage: true, webSearchEnabled: true });
     expect(state.computerAccess.activeDeviceId).toBe(state.computerAccess.localDeviceId);
     await store.close();

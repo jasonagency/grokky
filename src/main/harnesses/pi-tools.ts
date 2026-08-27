@@ -38,37 +38,37 @@ export function createPiTools(context: ProviderRunContext): ToolDefinition[] {
     }
   }
   if (access.enabled && access.grants.commands !== "blocked" && context.conversation.sandboxMode === "workspace-write" && context.conversation.allowCommands) {
-    tools.push(computerTool(context, "run_command", "Run command", "Run one Grokky-allowlisted development command in the leased workspace.", Type.Object({ command: Type.String() }, { additionalProperties: false }), false));
+    tools.push(computerTool(context, "run_command", "Run command", "Run one PuckBot-allowlisted development command in the leased workspace.", Type.Object({ command: Type.String() }, { additionalProperties: false }), false));
   }
   if (access.enabled && access.grants.browser !== "blocked") {
     tools.push(computerTool(context, "browse_url", "Browse URL", "Read one approved public HTTP or HTTPS page.", Type.Object({ url: Type.String() }, { additionalProperties: false }), true));
   }
   if (access.enabled && access.grants.screen !== "blocked") {
-    tools.push(computerTool(context, "capture_screen", "Capture screen", "Capture the current display after Grokky access approval.", Type.Object({}, { additionalProperties: false }), true));
+    tools.push(computerTool(context, "capture_screen", "Capture screen", "Capture the current display after PuckBot access approval.", Type.Object({}, { additionalProperties: false }), true));
   }
   if (access.enabled && access.grants.automation !== "blocked" && context.conversation.sandboxMode === "workspace-write") {
     tools.push(
-      computerTool(context, "open_application", "Open application", "Open a named desktop application after Grokky access approval.", Type.Object({ name: Type.String() }, { additionalProperties: false }), false),
+      computerTool(context, "open_application", "Open application", "Open a named desktop application after PuckBot access approval.", Type.Object({ name: Type.String() }, { additionalProperties: false }), false),
       computerTool(context, "click_screen", "Click screen", "Click a screen coordinate after inspecting current visible state.", Type.Object({ x: Type.Integer(), y: Type.Integer() }, { additionalProperties: false }), false),
-      computerTool(context, "type_text", "Type text", "Type text into the active application after Grokky access approval.", Type.Object({ text: Type.String() }, { additionalProperties: false }), false),
+      computerTool(context, "type_text", "Type text", "Type text into the active application after PuckBot access approval.", Type.Object({ text: Type.String() }, { additionalProperties: false }), false),
     );
   }
   if (context.controlTask) {
     tools.push({
-      name: "task_control", label: "Task control", description: "Pause, resume, stop, reprioritize, redirect, or send a follow-up to a durable Grokky task.",
+      name: "task_control", label: "Task control", description: "Pause, resume, stop, reprioritize, redirect, or send a follow-up to a durable PuckBot task.",
       parameters: Type.Object({ task_id: Type.String(), action: Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("stop"), Type.Literal("reprioritize"), Type.Literal("redirect"), Type.Literal("follow-up")]), message: Type.Optional(Type.String()), priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })) }, { additionalProperties: false }),
       execute: async (id, params) => {
         const input = params as { task_id: string; action: "pause" | "resume" | "stop" | "reprioritize" | "redirect" | "follow-up"; message?: string; priority?: number };
         await context.controlTask!(input.task_id, { type: input.action, ...(input.message ? { message: input.message } : {}), ...(input.priority !== undefined ? { priority: input.priority } : {}), idempotencyKey: controlKey(id) });
-        return result("Task control command accepted by Grokky.");
+        return result("Task control command accepted by PuckBot.");
       },
     }, {
-      name: "agent_message", label: "Message agent", description: "Send a durable message to the harness currently assigned to a Grokky task.",
+      name: "agent_message", label: "Message agent", description: "Send a durable message to the harness currently assigned to a PuckBot task.",
       parameters: Type.Object({ task_id: Type.String(), message: Type.String() }, { additionalProperties: false }),
       execute: async (id, params) => {
         const input = params as { task_id: string; message: string };
         await context.controlTask!(input.task_id, { type: "message", message: input.message, idempotencyKey: controlKey(id) });
-        return result("Agent message accepted by Grokky.");
+        return result("Agent message accepted by PuckBot.");
       },
     });
   }

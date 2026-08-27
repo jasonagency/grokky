@@ -127,7 +127,7 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
           ok: true,
           protocol: REMOTE_PROTOCOL,
           hostCapabilities: { filesCompatibility: true, agentJobs: Boolean(agentHost), ...(agentHost ? { agent: agentHost.capabilities() } : {}) },
-          device: { id: state.deviceId, name: hostname() || "Grokky Runner", platform: platform(), root, capabilities },
+          device: { id: state.deviceId, name: hostname() || "PuckBot Runner", platform: platform(), root, capabilities },
         });
         return;
       }
@@ -153,7 +153,7 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
           token: state.token,
           protocol: REMOTE_PROTOCOL,
           hostCapabilities: { filesCompatibility: true, agentJobs: Boolean(agentHost), ...(agentHost ? { agent: agentHost.capabilities() } : {}) },
-          device: { id: state.deviceId, name: hostname() || "Grokky Runner", platform: platform(), root, capabilities },
+          device: { id: state.deviceId, name: hostname() || "PuckBot Runner", platform: platform(), root, capabilities },
         });
         return;
       }
@@ -277,7 +277,7 @@ if (invokedPath && invokedPath === resolve(fileURLToPath(import.meta.url))) {
       ),
     } : {}),
     onReady: (details) => {
-      process.stdout.write(`Grokky Runner\nEndpoint: ${details.endpoint}\nPairing code: ${details.code}\nDevice: ${details.deviceId}\n`);
+      process.stdout.write(`PuckBot Runner\nEndpoint: ${details.endpoint}\nPairing code: ${details.code}\nDevice: ${details.deviceId}\n`);
     },
   });
 }

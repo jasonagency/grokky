@@ -1,6 +1,6 @@
 # Codex App Server and SDK integration
 
-This guide explains how Grokky uses the local Codex App Server by default and retains the official Codex SDK as a rollout fallback.
+This guide explains how PuckBot uses the local Codex App Server by default and retains the official Codex SDK as a rollout fallback.
 
 Primary references:
 
@@ -29,7 +29,7 @@ The renderer can choose a provider, model, reasoning level, workspace, and allow
 
 ## Authentication
 
-Grokky reuses the normal saved Codex sign-in. It does not accept an OpenAI API key through the interface.
+PuckBot reuses the normal saved Codex sign-in. It does not accept an OpenAI API key through the interface.
 
 Provider readiness checks look for a readable auth record under:
 
@@ -53,9 +53,9 @@ The readiness check only reports whether the auth file is readable. The SDK and 
 
 ## App Server protocol
 
-Grokky launches the bundled executable as `codex app-server --stdio`, sends `initialize`, validates the response, then sends `initialized`. Requests and responses are newline-delimited JSON. Messages are capped at 2 MiB, pending calls time out, malformed JSON and process exits reject the active attempt, and server request arguments never cross into the renderer.
+PuckBot launches the bundled executable as `codex app-server --stdio`, sends `initialize`, validates the response, then sends `initialized`. Requests and responses are newline-delimited JSON. Messages are capped at 2 MiB, pending calls time out, malformed JSON and process exits reject the active attempt, and server request arguments never cross into the renderer.
 
-The adapter maps `thread/start`, `thread/resume`, `turn/start`, `turn/steer`, `turn/interrupt`, `thread/queue/add`, item events, token usage, and turn completion into the provider-neutral harness contract. Steering includes the active turn ID as a precondition, so stale commands are visibly rejected instead of reaching a newer turn. Server-initiated command and file approvals are reduced to a safe label and reason, then decided from Grokky's workspace and command policy.
+The adapter maps `thread/start`, `thread/resume`, `turn/start`, `turn/steer`, `turn/interrupt`, `thread/queue/add`, item events, token usage, and turn completion into the provider-neutral harness contract. Steering includes the active turn ID as a precondition, so stale commands are visibly rejected instead of reaching a newer turn. Server-initiated command and file approvals are reduced to a safe label and reason, then decided from PuckBot's workspace and command policy.
 
 Run `npm run codex:generate-protocol` after updating the Codex package to inspect version-matched experimental TypeScript bindings. Review protocol changes and update the bounded client types and fixtures in the same dependency change.
 
@@ -65,7 +65,7 @@ Run `npm run codex:generate-protocol` after updating the Codex package to inspec
 
 The client configuration enables or disables:
 
-| SDK feature | Grokky source |
+| SDK feature | PuckBot source |
 | --- | --- |
 | Apps | Connectors enabled setting |
 | Plugins | Connectors enabled setting |
@@ -103,11 +103,11 @@ const options = {
 
 Important details:
 
-- The selected project is explicit for every thread. No-project chats use an isolated Grokky scratch folder, never the user's home directory.
+- The selected project is explicit for every thread. No-project chats use an isolated PuckBot scratch folder, never the user's home directory.
 - The composer exposes Read only, Workspace access, and Full access. Full access enables local development commands while the SDK workspace sandbox remains rooted in the selected project.
-- Live search is not silently implied. It follows the Grokky setting.
+- Live search is not silently implied. It follows the PuckBot setting.
 - `skipGitRepoCheck` allows work in ordinary folders, not just Git repositories.
-- `approvalPolicy: "never"` prevents a second hidden approval flow from competing with the interface. Grokky-owned OpenRouter tools use visible product approvals. Native Codex browser and computer features are enabled only for persistent allow policies because their per-action approval lifecycle is not exposed through this renderer.
+- `approvalPolicy: "never"` prevents a second hidden approval flow from competing with the interface. PuckBot-owned OpenRouter tools use visible product approvals. Native Codex browser and computer features are enabled only for persistent allow policies because their per-action approval lifecycle is not exposed through this renderer.
 
 ## Start and resume
 
@@ -133,7 +133,7 @@ stateDiagram-v2
 
 ## Streaming
 
-Grokky calls:
+PuckBot calls:
 
 ```ts
 const { events } = await thread.runStreamed(prompt, { signal });
@@ -177,7 +177,7 @@ The known skill-description context-budget notice is filtered because it describ
 
 ## Native multi-agent orchestration
 
-When a crew is selected, Grokky prepends an exact roster and an execution contract to the user prompt. The contract requires one successful `spawn_agent` call per role, parallel spawning before waits, and consolidation only after child results exist.
+When a crew is selected, PuckBot prepends an exact roster and an execution contract to the user prompt. The contract requires one successful `spawn_agent` call per role, parallel spawning before waits, and consolidation only after child results exist.
 
 Legacy SDK streams emit collaboration items containing:
 
@@ -189,11 +189,11 @@ Legacy SDK streams emit collaboration items containing:
 - Prompt
 - Operation status
 
-Those runtimes can encode a child state as either a string such as `pending_init` or a keyed object such as `{ completed: "report text" }`. They can also provide `receiver_agents` metadata with the specialist role. Grokky normalizes both shapes so it does not drop real role names or completed reports when the runtime evolves.
+Those runtimes can encode a child state as either a string such as `pending_init` or a keyed object such as `{ completed: "report text" }`. They can also provide `receiver_agents` metadata with the specialist role. PuckBot normalizes both shapes so it does not drop real role names or completed reports when the runtime evolves.
 
 Sol's v2 collaboration protocol records `SubAgentActivity` starts and child-authored `FINAL_ANSWER` messages in the active root thread's local Codex rollout JSONL, but the public SDK currently suppresses those records. `codex-rollout-observer.ts` tails only that active file, ignores entries older than the current turn, maps confirmed child IDs and plaintext final payloads, and ignores encrypted intermediate messages. This fallback produces the same provider-neutral `OrchestrationEvent` contract as legacy SDK items.
 
-`orchestrationFromThreadEvent` translates these into `OrchestrationEvent` records. It maps names by explicit prompt match, receiver order, and a stable thread-to-name cache. The controller then converts provider statuses into Grokky's `starting`, `working`, `waiting`, `completed`, `failed`, or `stopped` states.
+`orchestrationFromThreadEvent` translates these into `OrchestrationEvent` records. It maps names by explicit prompt match, receiver order, and a stable thread-to-name cache. The controller then converts provider statuses into PuckBot's `starting`, `working`, `waiting`, `completed`, `failed`, or `stopped` states.
 
 Every confirmed assignment, direct message, report, and control signal also becomes a persisted `CrewCommunication` record. The crew card's Messages tab renders these records chronologically, groups consecutive sends by speaker, and shows the real sender, receiver, exact content, exceptional status, and timestamp while keeping raw orchestration tool names out of the user-facing transcript. Selected roles are labelled as awaiting spawn until the provider emits evidence. Assistant prose is never converted into crew traffic.
 
@@ -203,7 +203,7 @@ sequenceDiagram
   participant S as SDK collaboration
   participant A as Specialist A
   participant B as Specialist B
-  participant UI as Grokky
+  participant UI as PuckBot
 
   P->>S: spawn_agent A
   S-->>UI: Collaboration event with child ID
@@ -221,11 +221,11 @@ sequenceDiagram
   P-->>UI: Final answer
 ```
 
-Grokky does not parse ordinary assistant text to claim an agent ran. A real collaboration event is required.
+PuckBot does not parse ordinary assistant text to claim an agent ran. A real collaboration event is required.
 
 ## Skills, MCP, and connectors
 
-Grokky does not inject skill text or MCP definitions into the SDK prompt. It manages the user's standard Codex configuration and lets Codex discover capabilities through its normal runtime.
+PuckBot does not inject skill text or MCP definitions into the SDK prompt. It manages the user's standard Codex configuration and lets Codex discover capabilities through its normal runtime.
 
 The settings interface reads and updates:
 
@@ -253,7 +253,7 @@ macOS:  app.asar.unpacked/node_modules/@openai/codex-darwin-*/vendor/*-apple-dar
 Windows: app.asar.unpacked/node_modules/@openai/codex-win32-*/vendor/*-pc-windows-msvc/bin/codex.exe
 ```
 
-If the file exists, Grokky passes it as `codexPathOverride`. This prevents `ENOTDIR` spawn failures caused by virtual ASAR paths.
+If the file exists, PuckBot passes it as `codexPathOverride`. This prevents `ENOTDIR` spawn failures caused by virtual ASAR paths.
 
 ## Adding a new Codex option
 
@@ -272,7 +272,7 @@ If the file exists, Grokky passes it as `codexPathOverride`. This prevents `ENOT
 
 - Run `codex login` in a terminal.
 - Confirm `CODEX_HOME` points to the same Codex home used by the login command.
-- Refresh provider status in Grokky.
+- Refresh provider status in PuckBot.
 
 ### A packaged run fails to spawn
 
