@@ -202,7 +202,9 @@ The unauthenticated health endpoint returns device name, platform, root, and cap
 
 ## Local persistence
 
-`StateStore` writes JSON with mode `0600` to a temporary sibling and then renames it over the active file. The load path normalizes expected fields, limits collection sizes, restores defaults, and converts stale active agent states to stopped.
+The main process sends persistence requests to a dedicated worker that owns one built-in SQLite connection. The database file uses mode `0600`, WAL journaling, foreign keys, forward-only transactional migrations, and serialized requests. The compatibility load path still normalizes expected fields, limits collection sizes, restores defaults, and converts stale active agent states to stopped.
+
+The first SQLite launch may read the previous `conversations.json` file. Grokky copies that source to a private legacy backup before importing a normalized snapshot and an import marker in one transaction. The source and backup remain recoverable if import or a later migration fails, and a completed marker prevents duplicate imports.
 
 Local state contains private information, including messages, workspace paths, provider selection, selected agents, activity details, audit targets, and remote endpoint metadata. It is not committed, but any local backup or device-management system may copy it.
 

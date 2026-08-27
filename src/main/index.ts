@@ -5,10 +5,14 @@ import { MainController } from "./controller";
 import { ComputerAccessService } from "./computer-access";
 import { createElectronComputerHost, createElectronComputerSecrets } from "./computer-host-electron";
 import { registerIpc } from "./ipc";
-import { StateStore } from "./state-store";
+import { StateStore, sqlitePathForLegacy } from "./state-store";
+import { WorkerDatabaseClient } from "./storage/database-client";
 import { IPC } from "../shared/contracts";
 
 let mainWindow: BrowserWindow | null = null;
+let stateStore: StateStore | null = null;
+let databaseClosed = false;
+let databaseClosing = false;
 
 if (process.env.GROKKY_USER_DATA_PATH) app.setPath("userData", process.env.GROKKY_USER_DATA_PATH);
 
@@ -50,8 +54,12 @@ async function createWindow(controller: MainController): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  const legacyStatePath = join(app.getPath("userData"), "conversations.json");
+  stateStore = new StateStore(legacyStatePath, app.getPath("home"), {
+    database: new WorkerDatabaseClient(sqlitePathForLegacy(legacyStatePath)),
+  });
   const controller = new MainController(
-    new StateStore(join(app.getPath("userData"), "conversations.json"), app.getPath("home")),
+    stateStore,
     app.getPath("home"),
     app.getVersion(),
     new ComputerAccessService({
@@ -688,4 +696,17 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", (event) => {
+  if (!stateStore || databaseClosed) return;
+  event.preventDefault();
+  if (databaseClosing) return;
+  databaseClosing = true;
+  void stateStore.close()
+    .catch((error) => console.error("Failed to close the control-plane database", error))
+    .finally(() => {
+      databaseClosed = true;
+      app.quit();
+    });
 });

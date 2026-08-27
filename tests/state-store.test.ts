@@ -1,11 +1,12 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
-import { defaultPersistentState, noProjectDirectory, StateStore } from "../src/main/state-store";
+import { defaultPersistentState, noProjectDirectory, sqlitePathForLegacy, StateStore } from "../src/main/state-store";
+import type { ControlPlaneDatabase } from "../src/main/storage/database-types";
 
 describe("StateStore", () => {
-  test("writes private, valid JSON and reads it back", async () => {
+  test("writes a private SQLite snapshot and reads it back", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-state-"));
     const pathname = join(directory, "state.json");
     const store = new StateStore(pathname, directory);
@@ -13,17 +14,34 @@ describe("StateStore", () => {
     state.settings.theme = "dark";
     state.settings.accentPalette = "electric-blue";
     await store.save(state);
-    expect(JSON.parse(await readFile(pathname, "utf8")).settings.theme).toBe("dark");
-    expect(JSON.parse(await readFile(pathname, "utf8")).settings.accentPalette).toBe("electric-blue");
     expect((await store.load()).settings.theme).toBe("dark");
     expect((await store.load()).settings.accentPalette).toBe("electric-blue");
     expect((await store.load()).computerAccess).toMatchObject({ enabled: true, grants: { files: "allow", commands: "ask" } });
+    expect((await stat(sqlitePathForLegacy(pathname))).mode & 0o777).toBe(0o600);
+    await store.close();
   });
 
   test("recovers from unreadable state", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-state-"));
     const store = new StateStore(join(directory, "missing.json"), directory);
     expect((await store.load()).conversations).toEqual([]);
+    await store.close();
+  });
+
+  test("does not hide database initialization failures behind empty state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "grokky-state-"));
+    const initializationError = new Error("migration failed");
+    const database: ControlPlaneDatabase = {
+      initialize: () => Promise.reject(initializationError),
+      readSnapshot: () => Promise.resolve(null),
+      writeSnapshot: () => Promise.resolve(),
+      importLegacySnapshot: () => Promise.resolve(false),
+      inspect: () => Promise.resolve({ schemaVersion: 0, appliedMigrations: [], journalMode: "unknown", tables: [] }),
+      close: () => Promise.resolve(),
+    };
+    const store = new StateStore(join(directory, "state.json"), directory, { database });
+
+    await expect(store.load()).rejects.toThrow("migration failed");
   });
 
   test("migrates old conversations and removes the benign skills budget notice", async () => {
@@ -45,9 +63,11 @@ describe("StateStore", () => {
         updatedAt: 2,
       }],
     }));
-    const state = await new StateStore(pathname, directory).load();
+    const store = new StateStore(pathname, directory);
+    const state = await store.load();
     expect(state.conversations[0]).toMatchObject({ projectMode: "none", workingDirectory: noProjectDirectory(directory), selectedAgentIds: [], agentRuns: [{ name: "tester", status: "stopped" }], crewCommunications: [{ content: "Stored report" }], activities: [] });
     expect(state.settings).toMatchObject({ defaultWorkingDirectory: noProjectDirectory(directory), recentWorkingDirectories: [], accentPalette: "lime", maxAgentThreads: 8, defaultSubagentModel: "", defaultSubagentReasoning: "", interruptAgentMessage: true, webSearchEnabled: true });
     expect(state.computerAccess.activeDeviceId).toBe(state.computerAccess.localDeviceId);
+    await store.close();
   });
 });

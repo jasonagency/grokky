@@ -1,0 +1,142 @@
+import type { DatabaseSync } from "node:sqlite";
+
+interface Migration {
+  version: number;
+  apply(database: DatabaseSync): void;
+}
+
+const migrations: Migration[] = [{
+  version: 1,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE snapshots (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE runs (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+      ) STRICT;
+
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        aggregate_id TEXT NOT NULL,
+        aggregate_sequence INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE (aggregate_id, aggregate_sequence)
+      ) STRICT;
+
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE policies (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE devices (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE secrets_metadata (
+        id TEXT PRIMARY KEY,
+        source_label TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE artifacts (
+        id TEXT PRIMARY KEY,
+        sha256 TEXT NOT NULL,
+        byte_size INTEGER NOT NULL,
+        media_type TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        retention_until INTEGER,
+        created_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE INDEX events_run_order ON events(aggregate_id, aggregate_sequence);
+      CREATE INDEX messages_conversation_order ON messages(conversation_id, created_at);
+      CREATE INDEX runs_conversation_order ON runs(conversation_id, created_at);
+    `);
+  },
+}];
+
+export function applyMigrations(database: DatabaseSync): number[] {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    ) STRICT;
+  `);
+  const applied = new Set(
+    database.prepare("SELECT version FROM schema_migrations ORDER BY version").all()
+      .map((row) => Number((row as { version: number }).version)),
+  );
+
+  for (const migration of migrations) {
+    if (applied.has(migration.version)) continue;
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      migration.apply(database);
+      database.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+        .run(migration.version, Date.now());
+      database.exec("COMMIT");
+      applied.add(migration.version);
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  return [...applied].sort((left, right) => left - right);
+}

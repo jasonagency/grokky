@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import type {
   AgentRun,
   AppSettings,
@@ -10,6 +9,10 @@ import type {
   Conversation,
   CrewCommunication,
 } from "../shared/contracts";
+import { DirectDatabaseClient } from "./storage/database-client";
+import type { ControlPlaneDatabase } from "./storage/database-types";
+import { readLegacyState } from "./storage/legacy-import";
+import { decodePersistentSnapshot, encodePersistentSnapshot } from "./storage/repositories/snapshot-repository";
 
 export interface PersistedRemoteDevice {
   id: string;
@@ -261,85 +264,134 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
   };
 }
 
+export function normalizePersistentState(
+  value: unknown,
+  homeDirectory: string,
+  onDiagnostic?: (message: string) => void,
+): PersistentState {
+  const fallback = defaultPersistentState(homeDirectory);
+  if (!value || typeof value !== "object") return fallback;
+  const parsed = value as Partial<PersistentState>;
+  const rawConversations = Array.isArray(parsed.conversations) ? parsed.conversations : [];
+  const conversations = rawConversations
+    .map((item) => normalizeConversation(item, homeDirectory))
+    .filter((item): item is Conversation => Boolean(item));
+  const invalidConversationCount = rawConversations.length - conversations.length;
+  if (invalidConversationCount > 0) {
+    onDiagnostic?.(`Skipped ${invalidConversationCount} invalid legacy conversation ${invalidConversationCount === 1 ? "record" : "records"}.`);
+  }
+  const settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : fallback.settings;
+  const scratchDirectory = noProjectDirectory(homeDirectory);
+  const storedDefaultDirectory = typeof settings.defaultWorkingDirectory === "string"
+    ? settings.defaultWorkingDirectory
+    : fallback.settings.defaultWorkingDirectory;
+  const defaultWorkingDirectory = resolve(storedDefaultDirectory) === resolve(homeDirectory)
+    ? scratchDirectory
+    : storedDefaultDirectory;
+  const storedRecentDirectories = Array.isArray(settings.recentWorkingDirectories)
+    ? settings.recentWorkingDirectories.filter((pathname): pathname is string => (
+        typeof pathname === "string"
+        && pathname.length > 0
+        && resolve(pathname) !== resolve(homeDirectory)
+        && resolve(pathname) !== resolve(scratchDirectory)
+      ))
+    : [];
+  const conversationDirectories = conversations.flatMap((conversation) => conversation.projectMode === "project" ? [conversation.workingDirectory] : []);
+  const recentWorkingDirectories = [...new Set([...storedRecentDirectories, ...conversationDirectories])].slice(0, 12);
+  const activeConversationId = conversations.some((item) => item.id === parsed.activeConversationId)
+    ? parsed.activeConversationId
+    : conversations[0]?.id;
+  return {
+    version: 2,
+    conversations,
+    ...(activeConversationId ? { activeConversationId } : {}),
+    settings: {
+      defaultWorkingDirectory,
+      recentWorkingDirectories,
+      openRouterCredentialPath: typeof settings.openRouterCredentialPath === "string"
+        ? settings.openRouterCredentialPath
+        : "",
+      theme: ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system",
+      accentPalette: typeof settings.accentPalette === "string"
+        && ["lime", "electric-blue", "ultraviolet", "solar-amber", "ice"].includes(settings.accentPalette)
+        ? settings.accentPalette as AppSettings["accentPalette"]
+        : "lime",
+      multiAgentEnabled: typeof settings.multiAgentEnabled === "boolean" ? settings.multiAgentEnabled : true,
+      maxAgentThreads: typeof settings.maxAgentThreads === "number"
+        ? Math.max(1, Math.min(8, Math.round(settings.maxAgentThreads)))
+        : 4,
+      defaultSubagentModel: typeof settings.defaultSubagentModel === "string" ? settings.defaultSubagentModel : "",
+      defaultSubagentReasoning: typeof settings.defaultSubagentReasoning === "string"
+        && ["", "low", "medium", "high", "xhigh"].includes(settings.defaultSubagentReasoning)
+        ? settings.defaultSubagentReasoning as AppSettings["defaultSubagentReasoning"]
+        : "",
+      interruptAgentMessage: typeof settings.interruptAgentMessage === "boolean" ? settings.interruptAgentMessage : true,
+      connectorsEnabled: typeof settings.connectorsEnabled === "boolean" ? settings.connectorsEnabled : true,
+      webSearchEnabled: typeof settings.webSearchEnabled === "boolean" ? settings.webSearchEnabled : true,
+    },
+    computerAccess: normalizeComputerAccess(parsed.computerAccess),
+  };
+}
+
+interface StateStoreOptions {
+  database?: ControlPlaneDatabase;
+  legacyPath?: string;
+  onDiagnostic?(message: string): void;
+}
+
+export function sqlitePathForLegacy(pathname: string): string {
+  return extname(pathname).toLowerCase() === ".json" ? `${pathname.slice(0, -5)}.sqlite3` : pathname;
+}
+
 export class StateStore {
-  private writeQueue: Promise<void> = Promise.resolve();
+  private readonly database: ControlPlaneDatabase;
+  private readonly legacyPath?: string;
+  private initialized = false;
 
   constructor(
-    private readonly pathname: string,
+    pathname: string,
     private readonly homeDirectory: string,
-  ) {}
+    private readonly options: StateStoreOptions = {},
+  ) {
+    const databasePath = sqlitePathForLegacy(pathname);
+    this.database = options.database ?? new DirectDatabaseClient(databasePath);
+    this.legacyPath = options.legacyPath ?? (databasePath === pathname ? undefined : pathname);
+  }
 
   async load(): Promise<PersistentState> {
     const fallback = defaultPersistentState(this.homeDirectory);
-    try {
-      const parsed = JSON.parse(await readFile(this.pathname, "utf8")) as Partial<PersistentState>;
-      const conversations = Array.isArray(parsed.conversations)
-        ? parsed.conversations.map((item) => normalizeConversation(item, this.homeDirectory)).filter((item): item is Conversation => Boolean(item))
-        : [];
-      const settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : fallback.settings;
-      const scratchDirectory = noProjectDirectory(this.homeDirectory);
-      const storedDefaultDirectory = typeof settings.defaultWorkingDirectory === "string"
-        ? settings.defaultWorkingDirectory
-        : fallback.settings.defaultWorkingDirectory;
-      const defaultWorkingDirectory = resolve(storedDefaultDirectory) === resolve(this.homeDirectory)
-        ? scratchDirectory
-        : storedDefaultDirectory;
-      const storedRecentDirectories = Array.isArray(settings.recentWorkingDirectories)
-        ? settings.recentWorkingDirectories.filter((pathname): pathname is string => (
-            typeof pathname === "string"
-            && pathname.length > 0
-            && resolve(pathname) !== resolve(this.homeDirectory)
-            && resolve(pathname) !== resolve(scratchDirectory)
-          ))
-        : [];
-      const conversationDirectories = conversations.flatMap((conversation) => conversation.projectMode === "project" ? [conversation.workingDirectory] : []);
-      const recentWorkingDirectories = [...new Set([...storedRecentDirectories, ...conversationDirectories])].slice(0, 12);
-      const activeConversationId = conversations.some((item) => item.id === parsed.activeConversationId)
-        ? parsed.activeConversationId
-        : conversations[0]?.id;
-      return {
-        version: 2,
-        conversations,
-        ...(activeConversationId ? { activeConversationId } : {}),
-        settings: {
-          defaultWorkingDirectory,
-          recentWorkingDirectories,
-          openRouterCredentialPath: typeof settings.openRouterCredentialPath === "string"
-            ? settings.openRouterCredentialPath
-            : "",
-          theme: ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system",
-          accentPalette: typeof settings.accentPalette === "string"
-            && ["lime", "electric-blue", "ultraviolet", "solar-amber", "ice"].includes(settings.accentPalette)
-            ? settings.accentPalette as AppSettings["accentPalette"]
-            : "lime",
-          multiAgentEnabled: typeof settings.multiAgentEnabled === "boolean" ? settings.multiAgentEnabled : true,
-          maxAgentThreads: typeof settings.maxAgentThreads === "number"
-            ? Math.max(1, Math.min(8, Math.round(settings.maxAgentThreads)))
-            : 4,
-          defaultSubagentModel: typeof settings.defaultSubagentModel === "string" ? settings.defaultSubagentModel : "",
-          defaultSubagentReasoning: typeof settings.defaultSubagentReasoning === "string"
-            && ["", "low", "medium", "high", "xhigh"].includes(settings.defaultSubagentReasoning)
-            ? settings.defaultSubagentReasoning as AppSettings["defaultSubagentReasoning"]
-            : "",
-          interruptAgentMessage: typeof settings.interruptAgentMessage === "boolean" ? settings.interruptAgentMessage : true,
-          connectorsEnabled: typeof settings.connectorsEnabled === "boolean" ? settings.connectorsEnabled : true,
-          webSearchEnabled: typeof settings.webSearchEnabled === "boolean" ? settings.webSearchEnabled : true,
-        },
-        computerAccess: normalizeComputerAccess(parsed.computerAccess),
-      };
-    } catch {
-      return fallback;
+    await this.ensureInitialized();
+    const storedSnapshot = await this.database.readSnapshot();
+    if (storedSnapshot) return normalizePersistentState(decodePersistentSnapshot(storedSnapshot), this.homeDirectory);
+
+    if (this.legacyPath) {
+      const legacy = await readLegacyState(this.legacyPath);
+      if (legacy) {
+        const importedState = normalizePersistentState(legacy.raw, this.homeDirectory, this.options.onDiagnostic);
+        await this.database.importLegacySnapshot(encodePersistentSnapshot(importedState), legacy.pathname, Date.now());
+        const importedSnapshot = await this.database.readSnapshot();
+        if (importedSnapshot) {
+          return normalizePersistentState(decodePersistentSnapshot(importedSnapshot), this.homeDirectory);
+        }
+      }
     }
+    return fallback;
   }
 
-  save(state: PersistentState): Promise<void> {
-    const payload = `${JSON.stringify(state, null, 2)}\n`;
-    const temporaryPath = `${this.pathname}.next`;
-    this.writeQueue = this.writeQueue.then(async () => {
-      await mkdir(dirname(this.pathname), { recursive: true });
-      await writeFile(temporaryPath, payload, { mode: 0o600 });
-      await rename(temporaryPath, this.pathname);
-    });
-    return this.writeQueue;
+  async save(state: PersistentState): Promise<void> {
+    await this.ensureInitialized();
+    await this.database.writeSnapshot(encodePersistentSnapshot(state));
+  }
+
+  async close(): Promise<void> {
+    if (!this.initialized) return;
+    await this.database.close();
+    this.initialized = false;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+    await this.database.initialize();
+    this.initialized = true;
   }
 }

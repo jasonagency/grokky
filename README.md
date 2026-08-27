@@ -55,7 +55,7 @@ flowchart LR
 
   C --> CX[Codex SDK]
   C --> OR[OpenRouter SDK]
-  C --> DB[Local JSON state]
+  C --> DB[SQLite storage worker]
   C --> CA[Computer access gate]
   C --> CM[Codex capability manager]
 
@@ -466,22 +466,24 @@ Add `--allow-write` only if the runner may accept workspace-write requests. Add 
 
 ## Persistence and chat deletion
 
-Grokky stores state in Electron's per-user application-data directory. The default conversation file is:
+Grokky stores state in Electron's per-user application-data directory. The primary database is:
 
 ```text
-macOS:  $HOME/Library/Application Support/Grokky/conversations.json
-Windows: %APPDATA%\Grokky\conversations.json
+macOS:  $HOME/Library/Application Support/Grokky/conversations.sqlite3
+Windows: %APPDATA%\Grokky\conversations.sqlite3
 ```
 
-The file contains conversations, messages, activity summaries, settings, usage, Codex thread IDs, access policy, recent audit entries, and encrypted remote-runner tokens. Writes use a temporary file plus atomic rename and private filesystem permissions.
+The database contains conversations, messages, activity summaries, settings, usage, Codex thread IDs, access policy, recent audit entries, and encrypted remote-runner tokens. A dedicated worker owns the SQLite connection, applies forward-only migrations, and serializes writes. The database file uses private filesystem permissions and write-ahead logging.
+
+On first launch after this migration, Grokky imports `conversations.json` once, preserves it unchanged, and creates `conversations.json.legacy-v2-backup`. The SQLite import marker prevents a later launch from importing the same records again.
 
 Deleting a chat from the sidebar or toolbar removes it from that local state and cancels an active run first. Deleting local metadata does not delete a provider's remote records, Codex home data, agent TOML files, or workspace files.
 
-To back up Grokky, close the app and copy `conversations.json` to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
+To back up Grokky, close the app and copy `conversations.sqlite3` plus any retained legacy backup to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
 
 ## Updating
 
-Grokky does not currently include an automatic updater. Download the newest artifact from the latest green `main` workflow run and replace or reinstall the application. Conversation state lives outside the application bundle, so an ordinary update preserves sessions and settings. Back up `conversations.json` before changing versions when the local history matters.
+Grokky does not currently include an automatic updater. Download the newest artifact from the latest green `main` workflow run and replace or reinstall the application. Conversation state lives outside the application bundle, so an ordinary update preserves sessions and settings. Back up `conversations.sqlite3` before changing versions when the local history matters.
 
 ## Repository map
 
@@ -573,7 +575,7 @@ Install the artifact matching the operating system and CPU architecture. For loc
 
 ### A chat still appears after deletion
 
-Use the sidebar or toolbar delete control and confirm the dialog. The app cancels an active run, removes the conversation from `conversations.json`, and selects another session. If the state file is not writable, inspect the per-user application-data directory and its permissions.
+Use the sidebar or toolbar delete control and confirm the dialog. The app cancels an active run, removes the conversation from the local SQLite snapshot, and selects another session. If the database is not writable, inspect the per-user application-data directory and its permissions.
 
 ### No downloadable installer appears
 

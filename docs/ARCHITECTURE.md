@@ -37,7 +37,8 @@ flowchart LR
   subgraph Trusted main process
     IPC[Validated IPC handlers]
     CONTROLLER[MainController]
-    STATE[StateStore]
+    STATE[StateStore compatibility facade]
+    STORAGE[SQLite storage worker]
     AGENTS[AgentService]
     CAPS[CapabilitiesService]
     ACCESS[ComputerAccessService]
@@ -49,6 +50,7 @@ flowchart LR
   PRELOAD --> IPC
   IPC --> CONTROLLER
   CONTROLLER --> STATE
+  STATE --> STORAGE
   CONTROLLER --> AGENTS
   CONTROLLER --> CAPS
   CONTROLLER --> ACCESS
@@ -82,12 +84,13 @@ The renderer receives complete application snapshots. It never receives a provid
 | Remote runner | `src/main/runner-service.ts` | Expose paired, bounded workspace tools on another computer |
 | Capabilities | `src/main/capabilities.ts` | Discover and toggle Codex skills, MCP servers, and connectors |
 | Agents | `src/main/agents.ts` | Discover, create, update, and delete Codex TOML agents |
-| State | `src/main/state-store.ts` | Normalize, migrate, and atomically persist local state |
+| State facade | `src/main/state-store.ts` | Normalize snapshots, import legacy JSON once, and preserve the controller contract |
+| Storage | `src/main/storage` | Own SQLite, forward-only migrations, serialized requests, and repositories |
 | Renderer | `src/renderer/src` | Present sessions, messages, activity, crews, settings, and approvals |
 
 ## Snapshot state model
 
-The main process is authoritative. React does not optimistically own durable conversation state.
+The main process is authoritative. React does not optimistically own durable conversation state. During the U1 compatibility release, `StateStore` reads and writes one normalized snapshot inside SQLite while the normalized tables and event schema are established for later projection ownership.
 
 ```mermaid
 stateDiagram-v2
@@ -106,7 +109,7 @@ Every meaningful mutation follows the same pattern:
 
 1. Validate the request in IPC or the controller.
 2. Mutate main-process state.
-3. Queue an atomic state save when the change is durable.
+3. Queue a transactional SQLite snapshot write through the storage worker when the change is durable.
 4. Publish a full `AppSnapshot` to the renderer.
 5. Let React derive view state from the new snapshot.
 
@@ -353,7 +356,7 @@ erDiagram
   COMPUTER_ACCESS ||--o{ AUDIT_ENTRY : records
 ```
 
-Persisted state intentionally includes user content and may be sensitive, but it lives outside the repository under Electron's per-user data directory. It is written with mode `0600` through a `.next` file followed by rename.
+Persisted state intentionally includes user content and may be sensitive, but it lives outside the repository under Electron's per-user data directory. The database file uses mode `0600`, WAL journaling, and a single worker-owned connection. A retained legacy JSON file is read only during the idempotent first import.
 
 Grokky does not persist:
 
@@ -374,7 +377,7 @@ The cleanest future seams are:
 
 - Add a provider behind the normalized `ProviderEvent` contract.
 - Add a local or remote tool behind `ComputerToolName`, capability mapping, and access audit.
-- Add persistence migrations in `StateStore.load` without exposing raw disk data to React.
+- Add forward-only persistence migrations under `src/main/storage` without exposing raw disk data to React.
 - Add OpenRouter MCP or connector support by converting external tool definitions into the bounded tool-loop contract.
 - Add remote screen or automation only after the runner has a transport, permission, and image-security design appropriate for it.
 
