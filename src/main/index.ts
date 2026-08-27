@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, nativeTheme, Notification, shell } from "electron";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MainController } from "./controller";
@@ -11,6 +11,9 @@ import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { TaskScheduler } from "./control-plane/scheduler";
 import { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
 import { IntegrationQueue } from "./workspaces/integration-queue";
+import { ControlRuntimeRepository } from "./control-plane/control-runtime-repository";
+import { SteeringService } from "./control-plane/steering-service";
+import { NotificationService } from "./control-plane/notification-service";
 import { IPC } from "../shared/contracts";
 
 let mainWindow: BrowserWindow | null = null;
@@ -67,6 +70,15 @@ app.whenReady().then(async () => {
   const worktreeRoot = join(app.getPath("userData"), "worktrees");
   const workspaceLeases = new WorkspaceLeaseManager(database, worktreeRoot);
   const integrationQueue = new IntegrationQueue(worktreeRoot, (record) => workspaceLeases.recordIntegration(record));
+  const controlRuntime = new ControlRuntimeRepository(database);
+  const steering = new SteeringService(controlRuntime);
+  const notifications = new NotificationService(controlRuntime, {
+    show: async (record) => {
+      if (!Notification.isSupported()) return false;
+      new Notification({ title: record.title, body: record.body }).show();
+      return true;
+    },
+  });
   const controller = new MainController(
     stateStore,
     app.getPath("home"),
@@ -80,6 +92,8 @@ app.whenReady().then(async () => {
     new TaskScheduler(database, { concurrency: 4, leaseDurationMs: 30_000 }),
     workspaceLeases,
     integrationQueue,
+    steering,
+    notifications,
   );
   mainController = controller;
   await controller.initialize();
@@ -323,8 +337,9 @@ app.whenReady().then(async () => {
           await new Promise((resolve) => setTimeout(resolve, 250));
           const taskGraphReady = await mainWindow.webContents.executeJavaScript(`(() => {
             const graph = document.querySelector('[aria-label="Task graph and queue"]');
+            const controls = document.querySelector('[aria-label="Live steering controls"]');
             const first = graph?.querySelector('button.task-node-card');
-            if (!(first instanceof HTMLButtonElement)) return false;
+            if (!(first instanceof HTMLButtonElement) || !(controls instanceof HTMLElement)) return false;
             first.focus();
             return document.activeElement === first && graph?.querySelectorAll('[role="listitem"]').length === 2;
           })()`);

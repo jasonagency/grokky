@@ -108,6 +108,27 @@ export class StorageDatabase {
     });
   }
 
+  readControlRuntime(): string | null {
+    const row = this.database.prepare("SELECT payload FROM control_runtime_state WHERE id = 1").get() as { payload?: unknown } | undefined;
+    return typeof row?.payload === "string" ? row.payload : null;
+  }
+
+  writeControlRuntime(snapshot: string): void {
+    const value = JSON.parse(snapshot) as import("../../shared/control-plane-contracts").ControlRuntimeSnapshot;
+    if (!Number.isInteger(value.revision) || !Array.isArray(value.commands) || !Array.isArray(value.notifications)) throw new Error("Invalid control runtime snapshot");
+    this.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO control_runtime_state(id, revision, payload, updated_at) VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, payload = excluded.payload, updated_at = excluded.updated_at
+      `).run(value.revision, snapshot, Date.now());
+      this.database.exec("DELETE FROM control_commands; DELETE FROM notification_outbox;");
+      const insertCommand = this.database.prepare("INSERT INTO control_commands(id, task_id, idempotency_key, status, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const command of value.commands) insertCommand.run(command.id, command.taskId, command.idempotencyKey, command.status, JSON.stringify(command), command.createdAt, command.updatedAt);
+      const insertNotification = this.database.prepare("INSERT INTO notification_outbox(id, task_id, delivery, payload, created_at) VALUES (?, ?, ?, ?, ?)");
+      for (const notification of value.notifications) insertNotification.run(notification.id, notification.taskId ?? null, notification.delivery, JSON.stringify(notification), notification.createdAt);
+    });
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): boolean {
     return this.transaction(() => {
       const marker = this.database.prepare("SELECT value FROM metadata WHERE key = ?").get("legacy_import_v2");
@@ -308,6 +329,14 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
     return this.enqueue(() => this.requireDatabase().writeWorkspaceState(snapshot));
   }
 
+  readControlRuntime(): Promise<string | null> {
+    return this.enqueue(() => this.requireDatabase().readControlRuntime());
+  }
+
+  writeControlRuntime(snapshot: string): Promise<void> {
+    return this.enqueue(() => this.requireDatabase().writeControlRuntime(snapshot));
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
   }
@@ -397,6 +426,14 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 
   writeWorkspaceState(snapshot: string): Promise<void> {
     return this.request({ type: "write_workspace_state", snapshot }).then(() => undefined);
+  }
+
+  readControlRuntime(): Promise<string | null> {
+    return this.request({ type: "read_control_runtime" });
+  }
+
+  writeControlRuntime(snapshot: string): Promise<void> {
+    return this.request({ type: "write_control_runtime", snapshot }).then(() => undefined);
   }
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {

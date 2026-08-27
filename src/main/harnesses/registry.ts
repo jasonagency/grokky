@@ -1,5 +1,7 @@
 import type { Conversation, ProviderId, ProviderStatus } from "../../shared/contracts";
 import type {
+  HarnessControl,
+  HarnessControlResult,
   HarnessCapabilities,
   HarnessRegistryEntry,
   RequiredHarnessCapabilities,
@@ -78,6 +80,12 @@ export class HarnessRegistry {
       ...context,
       onEvent: async (event) => context.onEvent(validateHarnessEvent(event)),
     });
+  }
+
+  deliverControl(harnessId: string, control: HarnessControl): Promise<HarnessControlResult> {
+    const adapter = this.adapters.get(harnessId);
+    if (!adapter) return Promise.resolve({ accepted: false, reason: `Harness adapter "${harnessId}" is not registered` });
+    return adapter.deliverControl(control);
   }
 
   async snapshot(settings: ProviderRunContext["settings"], homeDirectory: string): Promise<HarnessRegistryEntry[]> {

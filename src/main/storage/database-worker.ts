@@ -28,6 +28,11 @@ port.on("message", (request: DatabaseRequest) => {
     } else if (command.type === "write_workspace_state") {
       database.writeWorkspaceState(command.snapshot);
       response = { id: request.id, ok: true };
+    } else if (command.type === "read_control_runtime") {
+      response = { id: request.id, ok: true, value: database.readControlRuntime() };
+    } else if (command.type === "write_control_runtime") {
+      database.writeControlRuntime(command.snapshot);
+      response = { id: request.id, ok: true };
     } else if (command.type === "import_legacy_snapshot") {
       response = { id: request.id, ok: true, value: database.importLegacySnapshot(command.snapshot, command.source, command.importedAt) };
     } else if (command.type === "append_event") {

@@ -28,6 +28,8 @@ export interface HarnessDescriptor {
   providerCompatibility: ProviderId[];
   models: HarnessModelDescriptor[];
   capabilities: HarnessCapabilities;
+  estimatedInputCostPerMillion?: number;
+  estimatedOutputCostPerMillion?: number;
 }
 
 export interface HarnessHealth {

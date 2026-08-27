@@ -12,10 +12,12 @@ describe("control-plane database", () => {
     await client.initialize();
     await client.writeSnapshot('{"version":2,"marker":"first"}');
     await client.writeWorkspaceState(JSON.stringify({ revision: 1, leases: [], integrations: [] }));
+    await client.writeControlRuntime(JSON.stringify({ revision: 1, commands: [], notifications: [], budgetDecisions: [], routeDecisions: [], budgetPolicy: { hard: {}, soft: {}, reserveFraction: 0.1 }, routingPolicy: { requiredCapabilities: {}, preferredModels: [] } }));
 
     expect(await client.readSnapshot()).toBe('{"version":2,"marker":"first"}');
     expect(JSON.parse((await client.readWorkspaceState())!)).toEqual({ revision: 1, leases: [], integrations: [] });
-    expect(await client.inspect()).toMatchObject({ schemaVersion: 4, journalMode: "wal" });
+    expect(JSON.parse((await client.readControlRuntime())!)).toMatchObject({ revision: 1, commands: [], notifications: [] });
+    expect(await client.inspect()).toMatchObject({ schemaVersion: 5, journalMode: "wal" });
     expect((await client.inspect()).tables).toEqual(expect.arrayContaining([
       "agents",
       "conversations",
@@ -40,6 +42,9 @@ describe("control-plane database", () => {
       "workspace_leases",
       "workspace_state",
       "integration_queue",
+      "control_commands",
+      "control_runtime_state",
+      "notification_outbox",
     ]));
 
     await client.close();

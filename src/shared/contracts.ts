@@ -1,4 +1,4 @@
-import type { ProjectionChange, TaskAction, TaskGoalDraft, TaskGraphSnapshot, WorkspaceStateSnapshot } from "./control-plane-contracts";
+import type { ControlPolicyPatch, ControlRuntimeSnapshot, ProjectionChange, TaskAction, TaskControlRequest, TaskGoalDraft, TaskGraphSnapshot, WorkspaceStateSnapshot } from "./control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
 
 export type ProviderId = "codex" | "openrouter";
@@ -256,6 +256,7 @@ export interface AppSnapshot {
   computerAccess: ComputerAccessSnapshot;
   taskGraph: TaskGraphSnapshot;
   workspaceState?: WorkspaceStateSnapshot;
+  controlRuntime?: ControlRuntimeSnapshot;
   appVersion: string;
 }
 
@@ -301,6 +302,8 @@ export interface GrokkyApi {
   resolveComputerApproval(id: string, decision: ComputerApprovalDecision): Promise<void>;
   createTaskGoal(draft: TaskGoalDraft): Promise<void>;
   actOnTask(taskId: string, action: TaskAction): Promise<void>;
+  controlTask(taskId: string, control: TaskControlRequest): Promise<void>;
+  updateControlPolicies(patch: ControlPolicyPatch): Promise<void>;
   openExternal(url: string): Promise<void>;
   onSnapshot(listener: (snapshot: AppSnapshot) => void): void;
   onProjection(listener: (change: ProjectionChange) => void): void;
@@ -339,6 +342,8 @@ export const IPC = {
   computerApprovalResolve: "grokky:computer:approval-resolve",
   taskGoalCreate: "grokky:tasks:goal-create",
   taskAction: "grokky:tasks:action",
+  taskControl: "grokky:tasks:control",
+  controlPoliciesUpdate: "grokky:control:policies-update",
   externalOpen: "grokky:external:open",
 } as const;
 

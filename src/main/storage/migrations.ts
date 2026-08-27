@@ -244,6 +244,39 @@ const migrations: Migration[] = [{
       CREATE INDEX integration_queue_status_order ON integration_queue(status, created_at);
     `);
   },
+}, {
+  version: 5,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE control_runtime_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE control_commands (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE notification_outbox (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        delivery TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE INDEX control_commands_task_order ON control_commands(task_id, created_at);
+      CREATE INDEX notification_outbox_task_order ON notification_outbox(task_id, created_at);
+    `);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {

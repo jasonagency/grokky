@@ -3241,6 +3241,59 @@ button.settings-row:hover {
 .workspace-lease-panel dd { max-width: 66%; margin: 0; overflow: hidden; color: var(--text-soft); text-overflow: ellipsis; white-space: nowrap; }
 .workspace-lease-panel .workspace-recovery { color: var(--warning); }
 
+.live-controls,
+.budget-meter,
+.policy-editor {
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.live-controls header,
+.live-control-buttons,
+.budget-meter > div,
+.policy-editor > div { display: flex; align-items: center; gap: 6px; }
+.live-controls header { justify-content: space-between; }
+.live-controls h4,
+.budget-meter h4,
+.policy-editor h4 { margin: 0 0 8px; color: var(--text-faint); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+.live-controls header span { color: var(--accent); font-size: 9px; text-transform: uppercase; }
+.live-controls form { display: grid; gap: 5px; margin-top: 9px; }
+.live-controls form > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.live-controls input,
+.policy-editor input[type="number"] { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); }
+.control-delivery-list { display: grid; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; }
+.control-delivery-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; color: var(--text-soft); font-size: 9px; }
+.control-delivery-list small { grid-column: 1 / -1; color: var(--text-faint); }
+.delivery-acknowledged { color: var(--success); }
+.delivery-rejected { color: var(--danger); }
+.delivery-queued,
+.delivery-delivered { color: var(--warning); }
+.budget-meter > div { justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--text-faint); font-size: 10px; }
+.budget-meter p { margin: 8px 0 0; color: var(--text-soft); font-size: 10px; }
+.budget-meter .budget-paused,
+.budget-meter .budget-advisory { color: var(--warning); }
+.budget-meter .budget-blocked { color: var(--danger); }
+.policy-editor { display: grid; gap: 8px; }
+.policy-editor > div { align-items: end; }
+.policy-editor label { display: grid; gap: 4px; color: var(--text-faint); font-size: 9px; }
+.policy-editor .policy-checkbox { display: flex; align-items: center; }
+
+.attention-center {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.attention-center h4 { flex: 0 0 auto; margin: auto 7px auto 0; color: var(--warning); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+.attention-center button,
+.attention-center > div { display: grid; min-width: 180px; gap: 2px; padding: 7px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); text-align: left; }
+.attention-center span { color: var(--text-faint); font-size: 9px; }
+
 .task-inspector.empty { justify-content: center; color: var(--text-faint); text-align: center; }
 .task-inspector header > span { color: var(--accent); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .task-inspector h3,

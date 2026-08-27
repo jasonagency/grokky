@@ -27,7 +27,7 @@ import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
 import { capabilityForTool, ComputerAccessService, newAuditId, targetForTool, type ComputerToolName } from "./computer-access";
 import type { ProviderEvent } from "./providers/types";
-import type { ControlPlaneEventType, IntegrationRecord, TaskAction, TaskGoalDraft, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
+import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, ControlPolicyPatch, IntegrationRecord, RouteDecision, TaskAction, TaskControlRequest, TaskGoalDraft, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { LeaseReconciler } from "./control-plane/lease-reconciler";
@@ -35,6 +35,11 @@ import type { TaskScheduler } from "./control-plane/scheduler";
 import type { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
 import { GitRepository } from "./workspaces/git-repository";
 import type { IntegrationQueue, VerificationCommand } from "./workspaces/integration-queue";
+import type { SteeringService } from "./control-plane/steering-service";
+import type { NotificationService } from "./control-plane/notification-service";
+import type { HarnessControl } from "../shared/harness-contracts";
+import { PolicyEngine } from "./control-plane/policy-engine";
+import { BudgetService } from "./control-plane/budget-service";
 import { boundedConversationProjection } from "./control-plane/event-projector";
 import { communicationsFromOrchestrationEvent, mergeCrewCommunications } from "./crew-communications";
 import { createDefaultHarnessRegistry, HarnessRegistry } from "./harnesses/registry";
@@ -97,6 +102,8 @@ export class MainController {
     private readonly taskScheduler?: TaskScheduler,
     private readonly workspaceLeases?: WorkspaceLeaseManager,
     private readonly integrationQueue?: IntegrationQueue,
+    private readonly steering?: SteeringService,
+    private readonly notifications?: NotificationService,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -110,6 +117,8 @@ export class MainController {
       await new LeaseReconciler(this.taskScheduler).reconcileExpired();
     }
     await this.workspaceLeases?.initialize();
+    await this.steering?.initialize();
+    await this.notifications?.initialize();
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
     if (!this.state.conversations.length) this.createConversationInternal();
     await this.refreshProviderStatuses(false);
@@ -145,6 +154,7 @@ export class MainController {
       computerAccess: this.computerAccess.snapshot(this.state.computerAccess, this.activeWorkingDirectory(), this.pendingApprovals[0]),
       taskGraph: this.taskScheduler?.snapshot() ?? { revision: 0, goals: [], tasks: [] },
       workspaceState: this.workspaceLeases?.snapshot() ?? { revision: 0, leases: [], integrations: [] },
+      controlRuntime: this.steering?.snapshot(),
       appVersion: this.appVersion,
     });
   }
@@ -152,6 +162,7 @@ export class MainController {
   async createTaskGoal(draft: TaskGoalDraft): Promise<void> {
     if (!this.taskScheduler) throw new Error("The task scheduler is not available");
     await this.taskScheduler.createGoal(draft);
+    if (this.steering) await Promise.all(draft.nodes.map((node) => this.routeTask(node.id)));
     this.publishSnapshot();
   }
 
@@ -159,6 +170,63 @@ export class MainController {
     if (!this.taskScheduler) throw new Error("The task scheduler is not available");
     await this.taskScheduler.applyAction(taskId, action);
     this.publishSnapshot();
+  }
+
+  async controlTask(taskId: string, request: TaskControlRequest): Promise<void> {
+    if (!this.steering || !this.taskScheduler) throw new Error("Live task controls are not available");
+    const task = this.taskScheduler.snapshot().tasks.find((entry) => entry.id === taskId);
+    if (!task) throw new Error("Task was not found");
+    const command = await this.steering.queue({ ...request, taskId, harnessId: task.assignment.harnessId ?? "unassigned" });
+    const localAction = request.type === "pause" ? { type: "pause" as const }
+      : request.type === "resume" ? { type: "resume" as const }
+        : request.type === "reprioritize" && request.priority !== undefined ? { type: "reprioritize" as const, priority: request.priority }
+          : request.type === "stop" ? { type: "cancel" as const }
+            : null;
+    if (localAction && task.status !== "leased" && task.status !== "running") {
+      await this.taskScheduler.applyAction(taskId, localAction);
+      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Applied by the Grokky scheduler" }));
+    } else if (task.assignment.harnessId) {
+      const control: HarnessControl | null = request.type === "stop" ? { type: "cancel" }
+        : request.type === "redirect" && request.message ? { type: "steer", message: request.message }
+          : (request.type === "follow-up" || request.type === "message") && request.message ? { type: "follow-up", message: request.message }
+            : null;
+      if (control) await this.steering.deliver(command.id, () => this.harnessRegistry.deliverControl(task.assignment.harnessId!, control));
+    }
+    this.publishSnapshot();
+  }
+
+  async updateControlPolicies(patch: ControlPolicyPatch): Promise<void> {
+    if (!this.steering) throw new Error("Control policies are not available");
+    await this.steering.repository.mutate((value) => {
+      if (patch.budgetPolicy) value.budgetPolicy = structuredClone(patch.budgetPolicy);
+      if (patch.routingPolicy) value.routingPolicy = structuredClone(patch.routingPolicy);
+    });
+    this.publishSnapshot();
+  }
+
+  async routeTask(taskId: string): Promise<RouteDecision> {
+    if (!this.steering || !this.taskScheduler) throw new Error("Task routing is not available");
+    const runtime = this.steering.snapshot();
+    const decision = new PolicyEngine().route(this.harnesses, runtime.routingPolicy);
+    await this.steering.repository.mutate((value) => { value.routeDecisions.push({ ...decision, taskId }); });
+    if (decision.status === "selected") {
+      const task = this.taskScheduler.snapshot().tasks.find((entry) => entry.id === taskId);
+      if (!task) throw new Error("Task was not found");
+      await this.taskScheduler.applyAction(taskId, { type: "assign", assignment: { ...task.assignment, harnessId: decision.harnessId, model: decision.model } });
+    }
+    return decision;
+  }
+
+  async evaluateTaskBudget(taskId: string, measurements: BudgetMeasurements, enforceableBoundary: boolean): Promise<BudgetDecision> {
+    if (!this.steering) throw new Error("Task budgets are not available");
+    const decision = new BudgetService().evaluate(this.steering.snapshot().budgetPolicy, measurements, { enforceableBoundary });
+    await this.steering.repository.mutate((value) => { value.budgetDecisions.push({ ...decision, taskId }); });
+    if (decision.status === "paused" || decision.status === "blocked") {
+      await this.notifications?.notify({ type: "budget-pause", title: "Task paused by budget", body: decision.reason, taskId });
+      await this.controlTask(taskId, { type: decision.status === "blocked" ? "stop" : "pause", idempotencyKey: `budget:${taskId}:${decision.metric}:${decision.threshold}` });
+    }
+    this.publishSnapshot();
+    return decision;
   }
 
   async acquireTaskWorkspace(request: WorkspaceLeaseRequest): Promise<WorkspaceLease> {
@@ -183,6 +251,7 @@ export class MainController {
     const repository = await GitRepository.open(lease.root);
     const result = await this.integrationQueue.integrate({ taskId: lease.taskId, leaseId, repository, taskBranch: lease.branch, targetRef }, verification);
     if (result.status === "succeeded") await this.workspaceLeases.markIntegrated(leaseId);
+    else if (result.status === "conflict") await this.notifications?.notify({ type: "integration-conflict", title: "Integration conflict", body: result.conflictFiles?.join(", ") || result.error || "Resolve the integration conflict", taskId: lease.taskId });
     this.publishSnapshot();
     return result;
   }

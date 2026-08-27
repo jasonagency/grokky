@@ -2,6 +2,7 @@ import { dialog, ipcMain, shell } from "electron";
 import type { MainController } from "./controller";
 import { IPC } from "../shared/contracts";
 import { validateTaskAction, validateTaskGoalDraft, validateTaskId } from "./control-plane/task-graph";
+import type { ControlPolicyPatch, TaskControlRequest } from "../shared/control-plane-contracts";
 import {
   requireComputerAccessLevel,
   requireComputerApprovalDecision,
@@ -94,6 +95,21 @@ export function registerIpc(controller: MainController): void {
     validateTaskId(taskId),
     validateTaskAction(action),
   ));
+  ipcMain.handle(IPC.taskControl, (_event, taskId, value) => {
+    if (!value || typeof value !== "object") throw new Error("Invalid task control");
+    const control = value as Partial<TaskControlRequest>;
+    if (!new Set(["redirect", "follow-up", "pause", "resume", "stop", "reprioritize", "message"]).has(String(control.type))) throw new Error("Invalid task control type");
+    if (typeof control.idempotencyKey !== "string" || !/^[a-zA-Z0-9:_-]{1,160}$/.test(control.idempotencyKey)) throw new Error("Invalid task control idempotency key");
+    if (control.message !== undefined && (typeof control.message !== "string" || !control.message.trim() || control.message.length > 2_000)) throw new Error("Invalid task control message");
+    if (control.priority !== undefined && (!Number.isInteger(control.priority) || control.priority < -100 || control.priority > 100)) throw new Error("Invalid task control priority");
+    return controller.controlTask(validateTaskId(taskId), control as TaskControlRequest);
+  });
+  ipcMain.handle(IPC.controlPoliciesUpdate, (_event, value) => {
+    if (!value || typeof value !== "object") throw new Error("Invalid control policy update");
+    const patch = structuredClone(value) as ControlPolicyPatch;
+    if (patch.budgetPolicy && (!Number.isFinite(patch.budgetPolicy.reserveFraction) || patch.budgetPolicy.reserveFraction < 0 || patch.budgetPolicy.reserveFraction > 1)) throw new Error("Invalid budget reserve");
+    return controller.updateControlPolicies(patch);
+  });
   ipcMain.handle(IPC.externalOpen, async (_event, value) => {
     if (typeof value !== "string") throw new Error("Invalid URL");
     const url = new URL(value);

@@ -297,3 +297,110 @@ export interface WorkspaceStateSnapshot {
   leases: WorkspaceLease[];
   integrations: IntegrationRecord[];
 }
+
+export type ControlCommandType = "redirect" | "follow-up" | "pause" | "resume" | "stop" | "reprioritize" | "message";
+export type ControlCommandStatus = "queued" | "delivered" | "acknowledged" | "rejected" | "expired" | "superseded";
+
+export interface ControlCommandInput {
+  taskId: string;
+  attemptId?: string;
+  harnessId: string;
+  type: ControlCommandType;
+  message?: string;
+  priority?: number;
+  idempotencyKey: string;
+}
+
+export type TaskControlRequest = Omit<ControlCommandInput, "taskId" | "harnessId">;
+
+export interface ControlPolicyPatch {
+  budgetPolicy?: BudgetPolicy;
+  routingPolicy?: RoutingPolicy;
+}
+
+export interface ControlCommand extends ControlCommandInput {
+  id: string;
+  status: ControlCommandStatus;
+  detail?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type MeasurementQuality = "authoritative" | "estimated" | "delayed" | "unavailable";
+export type BudgetMetric = "tokens" | "costUsd" | "elapsedMs" | "concurrency" | "retries" | "toolRisk";
+
+export interface QualifiedMeasurement {
+  value?: number;
+  quality: MeasurementQuality;
+}
+
+export type BudgetMeasurements = Partial<Record<BudgetMetric, QualifiedMeasurement>>;
+
+export interface BudgetThresholds {
+  tokens?: number;
+  costUsd?: number;
+  elapsedMs?: number;
+  concurrency?: number;
+  retries?: number;
+  toolRisk?: number;
+}
+
+export interface BudgetPolicy {
+  hard: BudgetThresholds;
+  soft: BudgetThresholds;
+  reserveFraction: number;
+}
+
+export interface BudgetDecision {
+  taskId?: string;
+  status: "allowed" | "paused" | "blocked" | "advisory";
+  metric?: BudgetMetric;
+  measured?: number | null;
+  threshold?: number;
+  quality?: MeasurementQuality;
+  enforceability: "hard" | "soft" | "advisory";
+  reason: string;
+}
+
+export interface RoutingPolicy {
+  requiredCapabilities: import("./harness-contracts").RequiredHarnessCapabilities;
+  allowedHarnessIds?: string[];
+  preferredModels: string[];
+}
+
+export interface RouteRejection { harnessId: string; reason: string }
+
+export interface RouteDecision {
+  taskId?: string;
+  status: "selected" | "rejected";
+  harnessId?: string;
+  model?: string;
+  reason: string;
+  rejections: RouteRejection[];
+}
+
+export type NotificationType = "task-terminal" | "approval" | "budget-pause" | "routine-failed" | "integration-conflict" | "remote-disconnect" | "update-available";
+
+export interface NotificationInput {
+  type: NotificationType;
+  title: string;
+  body: string;
+  taskId?: string;
+}
+
+export interface NotificationRecord extends NotificationInput {
+  id: string;
+  delivery: "os" | "in-app";
+  deepLink?: string;
+  createdAt: number;
+}
+
+export interface ControlRuntimeSnapshot {
+  revision: number;
+  commands: ControlCommand[];
+  notifications: NotificationRecord[];
+  budgetDecisions: BudgetDecision[];
+  routeDecisions: RouteDecision[];
+  budgetPolicy: BudgetPolicy;
+  routingPolicy: RoutingPolicy;
+}
