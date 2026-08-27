@@ -1,14 +1,14 @@
 {
   "name": "grokky",
   "version": "0.1.2",
-  "description": "A local-first AI workspace powered by the Codex SDK and OpenRouter.",
+  "description": "A local-first multi-harness AI workspace powered by Codex, OpenRouter, and Pi.",
   "main": "./out/main/index.js",
   "author": "Early AI Dopters",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -25,26 +25,42 @@
     "package:win": "node scripts/package-platform.mjs win32 x64 nsis",
     "verify:package:mac": "node scripts/check-packaged-codex.mjs darwin arm64",
     "verify:package:win": "node scripts/check-packaged-codex.mjs win32 x64",
+    "release:mac": "node scripts/package-platform.mjs darwin arm64 dmg --release",
+    "release:win": "node scripts/package-platform.mjs win32 x64 nsis --release",
     "smoke:codex": "node scripts/smoke-codex.mjs",
+    "smoke:codex-app-server": "GROKKY_LIVE_CODEX_APP_SERVER=1 vitest run tests/codex-app-server-adapter.integration.test.ts",
+    "smoke:pi": "GROKKY_LIVE_PI=1 vitest run tests/pi-adapter.test.ts",
+    "codex:generate-protocol": "codex app-server generate-ts --experimental --out src/shared/generated/codex-app-server",
     "smoke:codex-provider": "GROKKY_LIVE_CODEX_PROVIDER=1 vitest run tests/codex-provider.integration.test.ts",
     "smoke:codex-web": "GROKKY_LIVE_CODEX_WEB=1 vitest run tests/codex-web.integration.test.ts",
     "smoke:multiagent": "node scripts/smoke-multiagent.mjs",
     "smoke:openrouter": "node scripts/smoke-openrouter.mjs",
+    "smoke:openrouter-mcp": "GROKKY_LIVE_OPENROUTER_MCP=1 vitest run tests/openrouter-mcp-live.integration.test.ts",
     "smoke:openrouter-crew": "GROKKY_LIVE_OPENROUTER_CREW=1 vitest run tests/openrouter-crew.integration.test.ts",
     "smoke:openrouter-web": "GROKKY_LIVE_OPENROUTER_WEB=1 vitest run tests/openrouter-web.integration.test.ts",
     "smoke:electron": "node scripts/smoke-electron.mjs",
+    "test:remote-host": "vitest run tests/remote-protocol.test.ts tests/host-reconciliation.integration.test.ts tests/host-offline.integration.test.ts",
+    "smoke:remote-host": "npm run build && GROKKY_LIVE_REMOTE_HOST=1 node scripts/smoke-remote-host.mjs",
+    "smoke:linux-screens": "npm run build && node scripts/smoke-linux-screens.mjs",
     "runner": "npm run build && node out/main/runner-service.js"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@openai/codex-sdk": "^0.149.1",
     "@openrouter/sdk": "^1.2.57",
     "@phosphor-icons/react": "^2.1.10",
+    "@sinclair/typebox": "^0.34.41",
+    "electron-updater": "^6.8.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "smol-toml": "^1.8.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@types/node": "^22.19.19",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -65,10 +81,18 @@
     },
     "files": [
       "out/**/*",
+      "build/icon-mascot.png",
       "package.json"
     ],
     "asar": true,
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "jasonagency",
+      "repo": "grokky",
+      "releaseType": "release"
+    },
+    "generateUpdatesFilesForAllChannels": true,
     "asarUnpack": [
       "node_modules/@openai/codex-darwin-*/vendor/**/*",
       "node_modules/@openai/codex-win32-*/vendor/**/*"
@@ -76,11 +100,13 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon-mascot.png",
-      "identity": null,
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true,
       "target": [
-        "dir",
-        "dmg"
+        "dmg",
+        "zip"
       ]
     },
     "dmg": {
@@ -88,6 +114,7 @@
     },
     "win": {
       "icon": "build/icon-mascot.png",
+      "verifyUpdateCodeSignature": true,
       "target": [
         "nsis"
       ]

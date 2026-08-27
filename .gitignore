@@ -1,4 +1,5 @@
 node_modules/
+.grokky-worktrees/
 out/
 release/
 output/

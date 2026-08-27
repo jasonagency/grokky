@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { SandboxMode } from "../shared/contracts";
+import type { WorkspaceLease } from "../shared/control-plane-contracts";
 
 const excludedDirectories = new Set([".git", "node_modules", "out", "release", "dist", "build", ".next", ".vinext"]);
 const blockedNames = /^(?:\.env(?:\..*)?|auth\.json|credentials?(?:\..*)?|\.npmrc|\.netrc|id_[^.]+(?:\.pub)?)$/i;
@@ -97,8 +98,11 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
   });
 }
 
-function requireWrite(mode: SandboxMode): void {
+function requireWrite(mode: SandboxMode, root: string, lease?: WorkspaceLease): void {
   if (mode !== "workspace-write") throw new Error("This conversation is read-only");
+  if (lease && (!lease.writable || lease.status !== "active" || resolve(lease.root) !== resolve(root))) {
+    throw new Error("Write tools must run inside the active workspace lease root");
+  }
 }
 
 const commandPrefixes = [
@@ -130,12 +134,13 @@ export type WorkspaceToolName = "list_files" | "search_files" | "read_file" | "c
 
 export async function executeWorkspaceTool(options: {
   root: string;
+  lease?: WorkspaceLease;
   mode: SandboxMode;
   allowCommands: boolean;
   name: WorkspaceToolName;
   args: Record<string, unknown>;
 }): Promise<string> {
-  const { root, mode, allowCommands, name, args } = options;
+  const { root, lease, mode, allowCommands, name, args } = options;
   if (name === "list_files") return listFiles(root);
   if (name === "search_files") return searchFiles(root, String(args.query ?? ""));
   if (name === "read_file") {
@@ -145,7 +150,7 @@ export async function executeWorkspaceTool(options: {
     return content.length > 100_000 ? `${content.slice(0, 100_000)}\n[truncated]` : content;
   }
   if (name === "create_file") {
-    requireWrite(mode);
+    requireWrite(mode, root, lease);
     const target = resolveWorkspacePath(root, String(args.path ?? ""));
     const content = String(args.content ?? "");
     if (content.length > 200_000) throw new Error("File content is too large");
@@ -160,7 +165,7 @@ export async function executeWorkspaceTool(options: {
     return `Created ${relative(root, target)}`;
   }
   if (name === "edit_file") {
-    requireWrite(mode);
+    requireWrite(mode, root, lease);
     const target = resolveWorkspacePath(root, String(args.path ?? ""));
     await assertRegularFile(target);
     const before = String(args.old_text ?? "");
@@ -174,7 +179,7 @@ export async function executeWorkspaceTool(options: {
     return `Updated ${relative(root, target)}`;
   }
   if (name === "run_command") {
-    requireWrite(mode);
+    requireWrite(mode, root, lease);
     if (!allowCommands) throw new Error("Commands are disabled for this conversation");
     return runAllowedCommand(root, String(args.command ?? ""));
   }

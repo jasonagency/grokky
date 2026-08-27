@@ -1,0 +1,4 @@
+{
+  "protocolMajor": 1,
+  "faults": ["duplicate-submit", "repeated-frame", "out-of-order-frame", "dropped-frame", "stale-epoch", "revoked-credential", "host-restart"]
+}

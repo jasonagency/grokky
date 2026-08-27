@@ -12,13 +12,13 @@ import type {
   SandboxMode,
 } from "./contracts";
 
-const providers = new Set<ProviderId>(["codex", "openrouter"]);
+const providers = new Set<ProviderId>(["codex", "openrouter", "pi"]);
 const reasoning = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh"]);
 const sandboxModes = new Set<SandboxMode>(["read-only", "workspace-write"]);
 const projectModes = new Set<ProjectMode>(["project", "none"]);
 const themes = new Set<AppSettings["theme"]>(["system", "light", "dark"]);
 const accentPalettes = new Set<AccentPalette>(["lime", "electric-blue", "ultraviolet", "solar-amber", "ice"]);
-const computerCapabilities = new Set<ComputerCapabilityId>(["files", "commands", "browser", "screen", "automation"]);
+const computerCapabilities = new Set<ComputerCapabilityId>(["files", "commands", "browser", "screen", "automation", "mcp"]);
 const computerLevels = new Set<ComputerAccessLevel>(["blocked", "ask", "allow"]);
 const computerDecisions = new Set<ComputerApprovalDecision>(["deny", "allow-once", "allow-session"]);
 

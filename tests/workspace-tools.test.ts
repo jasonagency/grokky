@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
 import { executeWorkspaceTool, resolveWorkspacePath } from "../src/main/workspace-tools";
+import type { WorkspaceLease } from "../src/shared/control-plane-contracts";
 
 describe("workspace tools", () => {
   test("rejects traversal and credential files", () => {
@@ -44,5 +45,11 @@ describe("workspace tools", () => {
     const root = await mkdtemp(join(tmpdir(), "grokky-tools-"));
     const result = await executeWorkspaceTool({ root, mode: "workspace-write", allowCommands: true, name: "run_command", args: { command: "pwd" } });
     expect(result.toLowerCase()).toContain(basename(root).toLowerCase());
+  });
+
+  test("rejects writes outside the active task lease root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "grokky-workspace-"));
+    const lease: WorkspaceLease = { id: "lease", taskId: "task", repositoryId: "repo", kind: "git", mode: "write", writable: true, workspace: root, root: join(root, "leased"), holderId: "worker", status: "active", createdAt: 1, updatedAt: 1 };
+    await expect(executeWorkspaceTool({ root, lease, mode: "workspace-write", allowCommands: false, name: "create_file", args: { path: "outside.txt", content: "blocked" } })).rejects.toThrow("lease root");
   });
 });

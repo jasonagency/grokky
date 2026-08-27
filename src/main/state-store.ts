@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import type {
   AgentRun,
   AppSettings,
@@ -10,6 +9,11 @@ import type {
   Conversation,
   CrewCommunication,
 } from "../shared/contracts";
+import type { HarnessAttempt } from "../shared/harness-contracts";
+import { DirectDatabaseClient } from "./storage/database-client";
+import type { ControlPlaneDatabase } from "./storage/database-types";
+import { readLegacyState } from "./storage/legacy-import";
+import { decodePersistentSnapshot, encodePersistentSnapshot } from "./storage/repositories/snapshot-repository";
 
 export interface PersistedRemoteDevice {
   id: string;
@@ -20,6 +24,7 @@ export interface PersistedRemoteDevice {
   encryptedToken: string;
   capabilities: ComputerCapabilityId[];
   lastSeenAt: number;
+  eventCursor: number;
   revoked: boolean;
 }
 
@@ -57,6 +62,7 @@ export function defaultComputerAccess(): PersistedComputerAccess {
       browser: "ask",
       screen: "ask",
       automation: "ask",
+      mcp: "ask",
     },
     networkAllowlist: [],
     remoteDevices: [],
@@ -74,6 +80,7 @@ export function defaultPersistentState(homeDirectory: string): PersistentState {
       recentWorkingDirectories: [],
       openRouterCredentialPath: "",
       theme: "system",
+      updateChannel: "stable",
       accentPalette: "lime",
       multiAgentEnabled: true,
       maxAgentThreads: 4,
@@ -82,12 +89,13 @@ export function defaultPersistentState(homeDirectory: string): PersistentState {
       interruptAgentMessage: true,
       connectorsEnabled: true,
       webSearchEnabled: true,
+      mcpToolPolicies: {},
     },
     computerAccess: defaultComputerAccess(),
   };
 }
 
-const capabilityIds = new Set<ComputerCapabilityId>(["files", "commands", "browser", "screen", "automation"]);
+const capabilityIds = new Set<ComputerCapabilityId>(["files", "commands", "browser", "screen", "automation", "mcp"]);
 const accessLevels = new Set<ComputerAccessLevel>(["blocked", "ask", "allow"]);
 
 function normalizeComputerAccess(value: unknown): PersistedComputerAccess {
@@ -127,6 +135,7 @@ function normalizeComputerAccess(value: unknown): PersistedComputerAccess {
             ? device.capabilities.filter((capability): capability is ComputerCapabilityId => capabilityIds.has(capability as ComputerCapabilityId))
             : ["files"],
           lastSeenAt: typeof device.lastSeenAt === "number" ? device.lastSeenAt : 0,
+          eventCursor: Number.isSafeInteger(device.eventCursor) && Number(device.eventCursor) >= 0 ? Number(device.eventCursor) : 0,
           revoked: device.revoked === true,
         }];
       }).slice(0, 24)
@@ -230,11 +239,35 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
     ? item.projectMode
     : inferredProjectMode;
   const runOutcomes = new Set<NonNullable<Conversation["lastRunOutcome"]>>(["delivered", "blocked", "failed", "stopped"]);
+  const provider = item.provider === "openrouter" || item.provider === "pi" ? item.provider : "codex";
+  const harnessAttempts = Array.isArray(item.harnessAttempts)
+    ? item.harnessAttempts.flatMap((value): HarnessAttempt[] => {
+        if (!value || typeof value !== "object") return [];
+        const attempt = value as Partial<HarnessAttempt>;
+        if (
+          typeof attempt.id !== "string"
+          || typeof attempt.harnessId !== "string"
+          || typeof attempt.adapterVersion !== "string"
+          || !["running", "completed", "failed", "stopped"].includes(attempt.status ?? "")
+          || typeof attempt.startedAt !== "number"
+        ) return [];
+        return [{
+          id: attempt.id,
+          harnessId: attempt.harnessId,
+          adapterVersion: attempt.adapterVersion,
+          status: attempt.status as HarnessAttempt["status"],
+          ...(attempt.session && typeof attempt.session.nativeSessionId === "string" ? { session: attempt.session } : {}),
+          startedAt: attempt.startedAt,
+          ...(typeof attempt.endedAt === "number" ? { endedAt: attempt.endedAt } : {}),
+        }];
+      }).slice(-40)
+    : [];
   return {
     id: item.id,
     title: item.title,
-    provider: item.provider === "openrouter" ? "openrouter" : "codex",
-    model: typeof item.model === "string" ? item.model : "gpt-5.6-sol",
+    provider,
+    harnessId: typeof item.harnessId === "string" ? item.harnessId : provider === "codex" ? "codex-sdk" : provider === "pi" ? "pi-native" : "openrouter-chat",
+    model: typeof item.model === "string" ? item.model : provider === "pi" ? "auto" : provider === "openrouter" ? "openai/gpt-5.2" : "gpt-5.6-sol",
     reasoning: ["low", "medium", "high", "xhigh"].includes(item.reasoning ?? "") ? item.reasoning! : "medium",
     sandboxMode: item.sandboxMode === "read-only" ? "read-only" : "workspace-write",
     allowCommands: item.allowCommands === true,
@@ -252,6 +285,7 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
     crewCommunications: Array.isArray(item.crewCommunications)
       ? item.crewCommunications.map(normalizeCrewCommunication).filter((entry): entry is CrewCommunication => Boolean(entry)).slice(-80)
       : [],
+    harnessAttempts,
     ...(item.usage ? { usage: item.usage } : {}),
     status: "idle",
     ...(runOutcomes.has(item.lastRunOutcome as NonNullable<Conversation["lastRunOutcome"]>) ? { lastRunOutcome: item.lastRunOutcome } : {}),
@@ -261,85 +295,141 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
   };
 }
 
+export function normalizePersistentState(
+  value: unknown,
+  homeDirectory: string,
+  onDiagnostic?: (message: string) => void,
+): PersistentState {
+  const fallback = defaultPersistentState(homeDirectory);
+  if (!value || typeof value !== "object") return fallback;
+  const parsed = value as Partial<PersistentState>;
+  const rawConversations = Array.isArray(parsed.conversations) ? parsed.conversations : [];
+  const conversations = rawConversations
+    .map((item) => normalizeConversation(item, homeDirectory))
+    .filter((item): item is Conversation => Boolean(item));
+  const invalidConversationCount = rawConversations.length - conversations.length;
+  if (invalidConversationCount > 0) {
+    onDiagnostic?.(`Skipped ${invalidConversationCount} invalid legacy conversation ${invalidConversationCount === 1 ? "record" : "records"}.`);
+  }
+  const settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : fallback.settings;
+  const scratchDirectory = noProjectDirectory(homeDirectory);
+  const storedDefaultDirectory = typeof settings.defaultWorkingDirectory === "string"
+    ? settings.defaultWorkingDirectory
+    : fallback.settings.defaultWorkingDirectory;
+  const defaultWorkingDirectory = resolve(storedDefaultDirectory) === resolve(homeDirectory)
+    ? scratchDirectory
+    : storedDefaultDirectory;
+  const storedRecentDirectories = Array.isArray(settings.recentWorkingDirectories)
+    ? settings.recentWorkingDirectories.filter((pathname): pathname is string => (
+        typeof pathname === "string"
+        && pathname.length > 0
+        && resolve(pathname) !== resolve(homeDirectory)
+        && resolve(pathname) !== resolve(scratchDirectory)
+      ))
+    : [];
+  const conversationDirectories = conversations.flatMap((conversation) => conversation.projectMode === "project" ? [conversation.workingDirectory] : []);
+  const recentWorkingDirectories = [...new Set([...storedRecentDirectories, ...conversationDirectories])].slice(0, 12);
+  const activeConversationId = conversations.some((item) => item.id === parsed.activeConversationId)
+    ? parsed.activeConversationId
+    : conversations[0]?.id;
+  return {
+    version: 2,
+    conversations,
+    ...(activeConversationId ? { activeConversationId } : {}),
+    settings: {
+      defaultWorkingDirectory,
+      recentWorkingDirectories,
+      openRouterCredentialPath: typeof settings.openRouterCredentialPath === "string"
+        ? settings.openRouterCredentialPath
+        : "",
+      theme: ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system",
+      updateChannel: settings.updateChannel === "beta" ? "beta" : "stable",
+      accentPalette: typeof settings.accentPalette === "string"
+        && ["lime", "electric-blue", "ultraviolet", "solar-amber", "ice"].includes(settings.accentPalette)
+        ? settings.accentPalette as AppSettings["accentPalette"]
+        : "lime",
+      multiAgentEnabled: typeof settings.multiAgentEnabled === "boolean" ? settings.multiAgentEnabled : true,
+      maxAgentThreads: typeof settings.maxAgentThreads === "number"
+        ? Math.max(1, Math.min(8, Math.round(settings.maxAgentThreads)))
+        : 4,
+      defaultSubagentModel: typeof settings.defaultSubagentModel === "string" ? settings.defaultSubagentModel : "",
+      defaultSubagentReasoning: typeof settings.defaultSubagentReasoning === "string"
+        && ["", "low", "medium", "high", "xhigh"].includes(settings.defaultSubagentReasoning)
+        ? settings.defaultSubagentReasoning as AppSettings["defaultSubagentReasoning"]
+        : "",
+      interruptAgentMessage: typeof settings.interruptAgentMessage === "boolean" ? settings.interruptAgentMessage : true,
+      connectorsEnabled: typeof settings.connectorsEnabled === "boolean" ? settings.connectorsEnabled : true,
+      webSearchEnabled: typeof settings.webSearchEnabled === "boolean" ? settings.webSearchEnabled : true,
+      mcpToolPolicies: settings.mcpToolPolicies && typeof settings.mcpToolPolicies === "object"
+        ? Object.fromEntries(Object.entries(settings.mcpToolPolicies).filter(([name, classification]) => (
+            /^[a-zA-Z0-9_-]{1,100}$/.test(name)
+            && new Set(["read", "write", "external-side-effect", "human-only"]).has(String(classification))
+          )).slice(0, 1_000)) as AppSettings["mcpToolPolicies"]
+        : {},
+    },
+    computerAccess: normalizeComputerAccess(parsed.computerAccess),
+  };
+}
+
+interface StateStoreOptions {
+  database?: ControlPlaneDatabase;
+  legacyPath?: string;
+  onDiagnostic?(message: string): void;
+}
+
+export function sqlitePathForLegacy(pathname: string): string {
+  return extname(pathname).toLowerCase() === ".json" ? `${pathname.slice(0, -5)}.sqlite3` : pathname;
+}
+
 export class StateStore {
-  private writeQueue: Promise<void> = Promise.resolve();
+  private readonly database: ControlPlaneDatabase;
+  private readonly legacyPath?: string;
+  private initialized = false;
 
   constructor(
-    private readonly pathname: string,
+    pathname: string,
     private readonly homeDirectory: string,
-  ) {}
+    private readonly options: StateStoreOptions = {},
+  ) {
+    const databasePath = sqlitePathForLegacy(pathname);
+    this.database = options.database ?? new DirectDatabaseClient(databasePath);
+    this.legacyPath = options.legacyPath ?? (databasePath === pathname ? undefined : pathname);
+  }
 
   async load(): Promise<PersistentState> {
     const fallback = defaultPersistentState(this.homeDirectory);
-    try {
-      const parsed = JSON.parse(await readFile(this.pathname, "utf8")) as Partial<PersistentState>;
-      const conversations = Array.isArray(parsed.conversations)
-        ? parsed.conversations.map((item) => normalizeConversation(item, this.homeDirectory)).filter((item): item is Conversation => Boolean(item))
-        : [];
-      const settings = parsed.settings && typeof parsed.settings === "object" ? parsed.settings : fallback.settings;
-      const scratchDirectory = noProjectDirectory(this.homeDirectory);
-      const storedDefaultDirectory = typeof settings.defaultWorkingDirectory === "string"
-        ? settings.defaultWorkingDirectory
-        : fallback.settings.defaultWorkingDirectory;
-      const defaultWorkingDirectory = resolve(storedDefaultDirectory) === resolve(this.homeDirectory)
-        ? scratchDirectory
-        : storedDefaultDirectory;
-      const storedRecentDirectories = Array.isArray(settings.recentWorkingDirectories)
-        ? settings.recentWorkingDirectories.filter((pathname): pathname is string => (
-            typeof pathname === "string"
-            && pathname.length > 0
-            && resolve(pathname) !== resolve(this.homeDirectory)
-            && resolve(pathname) !== resolve(scratchDirectory)
-          ))
-        : [];
-      const conversationDirectories = conversations.flatMap((conversation) => conversation.projectMode === "project" ? [conversation.workingDirectory] : []);
-      const recentWorkingDirectories = [...new Set([...storedRecentDirectories, ...conversationDirectories])].slice(0, 12);
-      const activeConversationId = conversations.some((item) => item.id === parsed.activeConversationId)
-        ? parsed.activeConversationId
-        : conversations[0]?.id;
-      return {
-        version: 2,
-        conversations,
-        ...(activeConversationId ? { activeConversationId } : {}),
-        settings: {
-          defaultWorkingDirectory,
-          recentWorkingDirectories,
-          openRouterCredentialPath: typeof settings.openRouterCredentialPath === "string"
-            ? settings.openRouterCredentialPath
-            : "",
-          theme: ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system",
-          accentPalette: typeof settings.accentPalette === "string"
-            && ["lime", "electric-blue", "ultraviolet", "solar-amber", "ice"].includes(settings.accentPalette)
-            ? settings.accentPalette as AppSettings["accentPalette"]
-            : "lime",
-          multiAgentEnabled: typeof settings.multiAgentEnabled === "boolean" ? settings.multiAgentEnabled : true,
-          maxAgentThreads: typeof settings.maxAgentThreads === "number"
-            ? Math.max(1, Math.min(8, Math.round(settings.maxAgentThreads)))
-            : 4,
-          defaultSubagentModel: typeof settings.defaultSubagentModel === "string" ? settings.defaultSubagentModel : "",
-          defaultSubagentReasoning: typeof settings.defaultSubagentReasoning === "string"
-            && ["", "low", "medium", "high", "xhigh"].includes(settings.defaultSubagentReasoning)
-            ? settings.defaultSubagentReasoning as AppSettings["defaultSubagentReasoning"]
-            : "",
-          interruptAgentMessage: typeof settings.interruptAgentMessage === "boolean" ? settings.interruptAgentMessage : true,
-          connectorsEnabled: typeof settings.connectorsEnabled === "boolean" ? settings.connectorsEnabled : true,
-          webSearchEnabled: typeof settings.webSearchEnabled === "boolean" ? settings.webSearchEnabled : true,
-        },
-        computerAccess: normalizeComputerAccess(parsed.computerAccess),
-      };
-    } catch {
-      return fallback;
+    await this.ensureInitialized();
+    const storedSnapshot = await this.database.readSnapshot();
+    if (storedSnapshot) return normalizePersistentState(decodePersistentSnapshot(storedSnapshot), this.homeDirectory);
+
+    if (this.legacyPath) {
+      const legacy = await readLegacyState(this.legacyPath);
+      if (legacy) {
+        const importedState = normalizePersistentState(legacy.raw, this.homeDirectory, this.options.onDiagnostic);
+        await this.database.importLegacySnapshot(encodePersistentSnapshot(importedState), legacy.pathname, Date.now());
+        const importedSnapshot = await this.database.readSnapshot();
+        if (importedSnapshot) {
+          return normalizePersistentState(decodePersistentSnapshot(importedSnapshot), this.homeDirectory);
+        }
+      }
     }
+    return fallback;
   }
 
-  save(state: PersistentState): Promise<void> {
-    const payload = `${JSON.stringify(state, null, 2)}\n`;
-    const temporaryPath = `${this.pathname}.next`;
-    this.writeQueue = this.writeQueue.then(async () => {
-      await mkdir(dirname(this.pathname), { recursive: true });
-      await writeFile(temporaryPath, payload, { mode: 0o600 });
-      await rename(temporaryPath, this.pathname);
-    });
-    return this.writeQueue;
+  async save(state: PersistentState): Promise<void> {
+    await this.ensureInitialized();
+    await this.database.writeSnapshot(encodePersistentSnapshot(state));
+  }
+
+  async close(): Promise<void> {
+    if (!this.initialized) return;
+    await this.database.close();
+    this.initialized = false;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+    await this.database.initialize();
+    this.initialized = true;
   }
 }

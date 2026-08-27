@@ -1,6 +1,6 @@
 # OpenRouter integration
 
-This guide explains credential resolution, model calls, tool execution, web search, multi-agent orchestration, usage accounting, and the current boundary between OpenRouter and Codex-native capabilities.
+This guide explains credential resolution, model calls, built-in and MCP tool execution, web search, multi-agent orchestration, usage accounting, and the boundary between OpenRouter and native harness capabilities.
 
 Primary references:
 
@@ -21,6 +21,8 @@ flowchart LR
   PROVIDER --> SDK[@openrouter/sdk]
   PROVIDER --> WEB[OpenRouter web-search endpoint]
   PROVIDER --> ACCESS[Computer access gate]
+  PROVIDER --> GATEWAY[MCP tool gateway]
+  GATEWAY --> MCP[stdio or Streamable HTTP MCP]
   ACCESS --> LOCAL[Local bounded tools]
   ACCESS --> REMOTE[Paired runner]
 ```
@@ -98,8 +100,30 @@ The available tool list is rebuilt for each loop from:
 | `open_application` | Automation | No | Automation not blocked |
 | `click_screen` | Automation | No | Automation not blocked |
 | `type_text` | Automation | No | Automation not blocked |
+| `mcp_<server>_<tool>_<hash>` | MCP | Read-classified only | Server enabled, schema accepted, tool not human-only |
 
 Tools are advertised to the model only when the selected device supports them. A remote workspace runner currently advertises files and optionally commands, so it cannot accidentally receive screen or UI automation calls.
+
+## MCP gateway
+
+OpenRouter can use enabled Codex MCP server configurations through Grokky's main-process gateway. The renderer receives only server IDs, transport labels, safe connection state, tool names, descriptions, and policy classifications. Commands, arguments, environment values, HTTP headers, bearer tokens, OAuth tokens, and raw configuration never enter React or model messages.
+
+The gateway supports local stdio and remote Streamable HTTP transports. Remote URLs require HTTPS except for loopback test or development servers. Local processes receive the SDK's limited inherited environment plus only their configured variables. MCP protocol messages and tool output are bounded.
+
+Every discovered tool receives a stable namespaced function name. Schemas larger than 24 KB, deeper than eight levels, recursive through `$ref`, excessively broad, or colliding are rejected before model exposure. Results are capped at 40,000 characters.
+
+Tool policy has four values:
+
+| Classification | Lead model | Read-only specialist | Approval behavior |
+| --- | :---: | :---: | --- |
+| Read | Yes | Yes | MCP capability policy applies |
+| Write | Yes | No | MCP capability policy applies |
+| External side effect | Yes | No | Defaults to Ask through MCP access |
+| Human only | No | No | Model execution is denied |
+
+Operator choices override server annotations. A server `readOnlyHint` becomes Read. Missing or ambiguous annotations default to External side effect. This fail-closed default prevents an unclassified mail, payment, deployment, or deletion tool from reaching a read-only specialist.
+
+Remote OAuth uses the MCP SDK's PKCE, protected-resource discovery, authorization-server discovery, resource indicators, refresh flow, issuer binding, and dynamic client registration. Tokens are encrypted with Electron `safeStorage` and stored under app user data. Failed refresh returns the server to an authorization-required state. Revocation calls the discovered endpoint when available, then removes local credentials.
 
 ## Tool loop
 
@@ -245,17 +269,9 @@ The final `UsageSummary` is emitted once after the final answer.
 
 ## Current limitations
 
-### Skills, MCP, and connectors
+### Skills and connector plugins
 
-Codex skills, MCP servers, and connector plugins are configured for the Codex runtime. They are not automatically serialized into OpenRouter tools. OpenRouter currently receives only Grokky's audited built-in tool catalog.
-
-Adding OpenRouter MCP support requires:
-
-1. Discovering a server's schemas without exposing unrelated configuration.
-2. Mapping schemas into OpenRouter tool definitions.
-3. Routing every call through the same capability and audit model.
-4. Handling remote authentication without sending secrets through React or conversation state.
-5. Defining specialist read-only behavior for third-party tools.
+OpenRouter MCP access is supported through the audited gateway. Codex skills and plugin connector runtimes are still native Codex capabilities and are not serialized into OpenRouter prompts or tool definitions unless they also expose an enabled MCP server.
 
 ### History window
 
@@ -275,7 +291,8 @@ Live web research currently uses a dedicated constant. If model routing becomes 
 6. Decide whether read-only specialists may receive the tool.
 7. Decide whether remote devices advertise the capability.
 8. Add deterministic permission, failure, and content tests.
-9. Run `npm run verify` plus the relevant live smoke check.
+9. For MCP, classify side effects and confirm specialist visibility.
+10. Run `npm run verify` plus the relevant live smoke check.
 
 ## Troubleshooting
 

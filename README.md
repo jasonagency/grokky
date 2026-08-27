@@ -5,11 +5,11 @@
 <h1 align="center">Grokky</h1>
 
 <p align="center">
-  <strong>A local-first desktop cockpit for Codex, OpenRouter, and coordinated AI crews.</strong>
+  <strong>A local-first desktop cockpit for Codex, OpenRouter, Pi, and coordinated AI crews.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/earlyaidopters/grokky/actions/workflows/verify.yml"><img alt="Verify" src="https://github.com/earlyaidopters/grokky/actions/workflows/verify.yml/badge.svg" /></a>
+  <a href="https://github.com/jasonagency/grokky/actions/workflows/verify.yml"><img alt="Verify" src="https://github.com/jasonagency/grokky/actions/workflows/verify.yml/badge.svg" /></a>
   <img alt="Repository visibility" src="https://img.shields.io/badge/repository-public-2ea44f?style=flat-square" />
   <img alt="Electron" src="https://img.shields.io/badge/Electron-43-47848f?style=flat-square&logo=electron&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6-3178c6?style=flat-square&logo=typescript&logoColor=white" />
@@ -18,7 +18,7 @@
   <img alt="License" src="https://img.shields.io/badge/license-UNLICENSED-a8d84e?style=flat-square" />
 </p>
 
-Grokky turns a folder on your computer into a visual AI workspace. Pick the official Codex SDK or any compatible OpenRouter model, choose a crew, define the access boundary, and watch the work unfold as messages, tool activity, specialist handoffs, approvals, and usage.
+Grokky turns a folder on your computer into a visual AI workspace. Pick Codex App Server, OpenRouter, or the native Pi SDK, define the access boundary, and watch work unfold as messages, tool activity, specialist handoffs, approvals, and usage.
 
 The interface is only the cockpit. Credentials, model processes, files, commands, native permissions, and remote-computer tokens stay behind Electron's trusted main-process boundary.
 
@@ -53,9 +53,10 @@ flowchart LR
   UI --> B[Typed IPC bridge]
   B --> C[Main controller]
 
-  C --> CX[Codex SDK]
-  C --> OR[OpenRouter SDK]
-  C --> DB[Local JSON state]
+  C --> HR[Harness registry]
+  HR --> CX[Codex SDK adapter]
+  HR --> OR[OpenRouter adapter]
+  C --> DB[SQLite storage worker]
   C --> CA[Computer access gate]
   C --> CM[Codex capability manager]
 
@@ -86,11 +87,13 @@ Grokky keeps them visible and independently configurable. A conversation records
 | Area | Capability |
 | --- | --- |
 | Conversations | Create, search, switch, cancel, and delete local chats with a confirmation step |
-| Providers | Switch between the official Codex SDK and OpenRouter per conversation |
-| Models | Select Codex models, enter any valid OpenRouter model ID, and set reasoning effort |
+| Providers | Switch between Codex App Server, OpenRouter, and the native Pi SDK per conversation |
+| Models | Select Codex models, enter OpenRouter or Pi provider/model IDs, and set reasoning effort |
 | Projects | Search recent folders, choose or create a project from the composer, or use an isolated no-project scratch folder |
 | Access | Switch each conversation between Read only, Workspace access, and Full access for local development commands |
 | Live activity | Render reasoning, plans, files, commands, tools, errors, and usage as normalized events |
+| Task control | Persist redirects, follow-ups, safe-boundary pauses, immediate stops, routing decisions, budgets, and notification outcomes |
+| Background work | Keep local queued or running work alive from the tray; full quit explicitly checkpoints recoverable state and stops local attempts |
 | Multi-agent | Run native Codex child threads or parallel OpenRouter specialists with a final lead |
 | Agents | Create personal or project TOML agents with unique mascot colors, models, reasoning, and access |
 | Skills | Discover and enable Codex skills from project, personal, system, and plugin roots |
@@ -100,7 +103,8 @@ Grokky keeps them visible and independently configurable. A conversation records
 | Computer access | Gate files, commands, public web pages, and supported native controls |
 | Remote computer | Pair a bounded runner over a private network, with encrypted bearer-token storage |
 | Safety | Block credential files, path traversal, symlinks, private-network browser targets, and unsafe commands |
-| Persistence | Atomically store sessions, settings, audit history, usage, and resumable Codex thread IDs |
+| Persistence | Store sessions, task graphs, worktrees, traces, teams, audit history, and resumable harness references in SQLite |
+| Updates | Check stable or beta releases automatically, verify integrity, and wait for a safe restart checkpoint |
 | Appearance | System, dark, and light themes plus lime, electric blue, ultraviolet, amber, and ice accents |
 
 ## Provider capability matrix
@@ -115,7 +119,7 @@ The runtimes intentionally share a UI contract, not an implementation.
 | Final coordinator | Codex parent thread | One lead model after specialists finish |
 | Workspace tools | Codex sandbox and SDK tools | Grokky's bounded functions |
 | Skills | Yes | Not yet |
-| MCP servers | Yes | Not yet |
+| MCP servers | Yes | Yes, through Grokky's audited gateway |
 | Connector plugins | Yes | Not yet |
 | Live web research | Codex live search | OpenRouter server web-search tool |
 | Screen input | Native SDK feature when always allowed | Grokky screenshot tool with approval on macOS |
@@ -169,15 +173,13 @@ The renderer, providers, persistence, workspace tools, web research, agent orche
 
 Packaged users do not need Node.js or npm. They only need credentials for at least one provider.
 
-1. Open the repository's [Verify workflow](https://github.com/earlyaidopters/grokky/actions/workflows/verify.yml).
-2. Open the newest green run on `main`.
-3. Download one artifact from the **Artifacts** section:
-   - `Grokky-macOS-arm64`
-   - `Grokky-Windows-x64`
-4. Unzip the downloaded artifact.
+1. Open the repository's [Releases page](https://github.com/jasonagency/grokky/releases).
+2. Choose the newest stable release, or a beta only if you intend to test prerelease behavior.
+3. Download the installer for macOS arm64 or Windows x64.
+4. Verify the file against the release's `SHA256SUMS` manifest and GitHub build-provenance attestation.
 5. Install the platform package below.
 
-Workflow artifacts are retained for 14 days. If an older artifact has expired, use the newest successful run or push a new commit to produce fresh packages.
+The tag-triggered release workflow signs both native packages, notarizes and staples the macOS package, verifies Windows Authenticode, checks updater metadata, and publishes checksums and provenance. Artifacts from the ordinary Verify workflow are unsigned development packages and are not a distribution channel.
 
 ### macOS installation
 
@@ -192,7 +194,7 @@ Workflow artifacts are retained for 14 days. If an older artifact has expired, u
 3. Launch Grokky from the Start menu or the selected directory.
 
 > [!WARNING]
-> Current packages are unsigned development builds. macOS Gatekeeper or Windows SmartScreen may warn before launch. Do not bypass an operating-system warning unless you trust the repository, the workflow run, and the exact commit that produced the artifact. Public distribution should use signed and notarized packages.
+> Do not install an operating-system warning exception for an unsigned development artifact. Distribution releases must pass the signed release workflow.
 
 ## First-run checklist
 
@@ -212,14 +214,14 @@ New installs start in **No project**, an isolated `~/.grokky/no-project` scratch
 ### Prerequisites
 
 - Apple Silicon macOS or Windows x64
-- Node.js 20.19 or newer
+- Node.js 22.19 or newer
 - npm 10 or newer
 - A saved Codex sign-in, an OpenRouter key, or both
 
 ### Install and run
 
 ```bash
-git clone git@github.com:earlyaidopters/grokky.git
+git clone git@github.com:jasonagency/grokky.git
 cd grokky
 npm ci
 npm run dev
@@ -412,7 +414,7 @@ The capability manager reads the active Codex configuration and presents three d
 - **MCP servers** discovers `[mcp_servers.*]` tables and preserves whether each server is local, remote, or otherwise configured.
 - **Connectors** discovers `[plugins.*]` entries.
 
-Toggles update only the relevant `enabled` field or skill config block in `$HOME/.codex/config.toml`. Writes are atomic and preserve unrelated configuration. These capabilities currently feed Codex runs. OpenRouter uses Grokky's built-in bounded tools and does not yet consume Codex skills, MCP servers, or connectors.
+Toggles update only the relevant `enabled` field or skill config block in `$HOME/.codex/config.toml`. Writes are atomic and preserve unrelated configuration. Skills and connector plugins remain native Codex capabilities. OpenRouter can use enabled MCP servers through Grokky's audited main-process gateway, but it does not serialize Codex skills or connector runtimes into model prompts.
 
 ## Computer access model
 
@@ -443,57 +445,75 @@ Read the complete threat model and trust boundaries in [docs/SECURITY.md](docs/S
 
 ## Pair a private computer
 
-The included runner exposes only bounded workspace tools. It has no model credential, renderer, or access to Grokky's conversation database.
+The runner can operate in two modes. Its default compatibility mode exposes only bounded workspace tools and has no model credential. `--agent-host` additionally enables durable Codex, OpenRouter, and Pi jobs using credentials that already exist on that computer. Neither mode receives Grokky's conversation database.
 
 On the computer to control:
 
 ```bash
-git clone git@github.com:earlyaidopters/grokky.git
+git clone git@github.com:jasonagency/grokky.git
 cd grokky
 npm ci
 npm run runner -- \
   --root "/absolute/path/to/workspace" \
   --host "100.x.x.x" \
-  --port 4747
+  --port 4747 \
+  --agent-host \
+  --allow-write \
+  --allow-commands
 ```
 
 The runner prints a one-time six-digit pairing code. In Grokky, open **Settings → Computer access**, enter the private endpoint and code, then select the device.
 
-Add `--allow-write` only if the runner may accept workspace-write requests. Add `--allow-commands` only if it may accept the small command allowlist. Grokky's own conversation sandbox and capability policy still apply, creating two independent checks.
+The host advertises only harnesses whose local credential and runtime checks pass. Add `--allow-write` only if it may accept workspace-write requests, and add `--allow-commands` only if it may accept the bounded command allowlist. Grokky's task policy still narrows both flags. Host jobs spool by default at `$HOME/.grokky-runner/agent-host.json`; use `--agent-state` to place that private file elsewhere.
 
 > [!WARNING]
-> Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
+> Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in compatibility runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
+
+The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, versioned routine graphs, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. Remote routines are registered on the selected host before their fire time, so the host can start dependency-aware work while Grokky and the desktop are closed. Reconnecting advances a per-host durable event cursor, restores unattended activity to the trace, emits terminal or approval notifications, and settles ordinary remote task attempts even after the desktop lease expires. Provider credentials remain on the host, and the desktop retains only its revocable encrypted pairing credential.
+
+Browser screens use an operator-started Chromium instance whose DevTools listener is bound to loopback. Start Chromium with one persistent `--user-data-dir` and `--remote-debugging-port`, then pass `--browser-cdp http://127.0.0.1:<port>`. The broker shares that approved login profile while leasing a distinct page to each agent. On Linux, `--desktop-displays :21,:22` leases explicitly provisioned non-root X displays and requires `gnome-screenshot` plus `xdotool`; it never creates or runs a desktop as root.
+
+Agent computer sessions add independently addressed browser pages or non-root desktop sessions behind that same host protocol. Every screen and input event is bound to one lease. Browser pages may share logins that the operator approved, and all sessions share one user-scoped trust boundary. The interface deliberately does not describe them as sandboxes or tenant isolation. Human takeover pauses agent input and keeps password, passkey, two-factor, CAPTCHA, and payment-confirmation content out of model traces.
 
 ## Persistence and chat deletion
 
-Grokky stores state in Electron's per-user application-data directory. The default conversation file is:
+Grokky stores state in Electron's per-user application-data directory. The primary database is:
 
 ```text
-macOS:  $HOME/Library/Application Support/Grokky/conversations.json
-Windows: %APPDATA%\Grokky\conversations.json
+macOS:  $HOME/Library/Application Support/Grokky/conversations.sqlite3
+Windows: %APPDATA%\Grokky\conversations.sqlite3
 ```
 
-The file contains conversations, messages, activity summaries, settings, usage, Codex thread IDs, access policy, recent audit entries, and encrypted remote-runner tokens. Writes use a temporary file plus atomic rename and private filesystem permissions.
+The database contains conversations, messages, activity summaries, settings, usage, harness attempt and session references, access policy, recent audit entries, and encrypted remote-runner tokens. A dedicated worker owns the SQLite connection, applies forward-only migrations, and serializes writes. Run activity is also captured as ordered, append-only domain events with rebuildable conversation projections. Large event content becomes a bounded, content-addressed local artifact. The database file uses private filesystem permissions and write-ahead logging.
+
+On first launch after this migration, Grokky imports `conversations.json` once, preserves it unchanged, and creates `conversations.json.legacy-v2-backup`. The SQLite import marker prevents a later launch from importing the same records again.
+
+Before opening an existing SQLite database, Grokky writes `conversations.sqlite3.pre-migration-backup` with private permissions. A failed migration leaves the original transaction intact and reports that recovery path instead of starting with empty state.
 
 Deleting a chat from the sidebar or toolbar removes it from that local state and cancels an active run first. Deleting local metadata does not delete a provider's remote records, Codex home data, agent TOML files, or workspace files.
 
-To back up Grokky, close the app and copy `conversations.json` to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
+To back up Grokky, close the app and copy `conversations.sqlite3` plus any retained legacy backup to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
 
 ## Updating
 
-Grokky does not currently include an automatic updater. Download the newest artifact from the latest green `main` workflow run and replace or reinstall the application. Conversation state lives outside the application bundle, so an ordinary update preserves sessions and settings. Back up `conversations.json` before changing versions when the local history matters.
+Signed packaged builds check the selected stable or beta channel automatically. Grokky never downloads or restarts without an operator action. Before presenting an installer for restart it requires a newer matching-channel version, HTTPS metadata, a valid SHA-512 digest, and the platform's application-owner signature validation.
+
+An update may download while work continues. Restart stays blocked while a local conversation or task lease is active, an integration is unresolved, an approval is pending, database initialization is incomplete, or the selected remote host has not reconciled. The banner names every blocker and preserves the open conversation, composer, and task context.
+
+Desktop updates never update an agent host implicitly. Host packages use a separate backup, install, health-check, protocol-negotiation, and rollback sequence. Compatible minor protocol skew may continue. A major mismatch blocks new jobs while retaining export and recovery. See [Release operations](docs/RELEASING.md).
 
 ## Repository map
 
 ```text
 grokky/
-├── .github/workflows/verify.yml       macOS and Windows CI and package gate
+├── .github/workflows/                 verification and signed release gates
 ├── build/icon-mascot.png              active application icon
 ├── docs/
 │   ├── ARCHITECTURE.md                process, data, and orchestration design
 │   ├── CODEX-SDK.md                   Codex integration guide
 │   ├── DEVELOPMENT.md                 development and release workflow
 │   ├── OPENROUTER.md                  OpenRouter integration guide
+│   ├── RELEASING.md                   signing, publication, update, and rollback runbook
 │   └── SECURITY.md                    threat model and privacy boundary
 ├── scripts/
 │   ├── check-repository-hygiene.mjs   privacy and secret guard
@@ -527,7 +547,7 @@ npm run package:win:dir
 npm run package:win
 ```
 
-Artifacts are written under `release/` and are ignored by Git. Every push to `main` verifies and packages on native macOS arm64 and Windows x64 GitHub runners, checks that the correct Codex executable is present outside `app.asar`, and uploads both installers as workflow artifacts. Development packages are unsigned. External distribution requires the appropriate Apple Developer ID or Windows code-signing identity and a release-specific security review.
+Artifacts are written under `release/` and are ignored by Git. Every push to `main` verifies and packages on native macOS arm64 and Windows x64 GitHub runners, checks that the correct Codex executable is present outside `app.asar`, and uploads unsigned development installers. A matching version tag runs the separate signed release workflow, which requires platform signing credentials, notarization, updater metadata, checksums, provenance, and rollback evidence before stable publication.
 
 Package commands intentionally refuse to cross-build on the wrong operating system. Electron can produce a Windows shell on macOS, or a macOS shell on another host, while silently omitting the target-specific Codex executable. Native packaging plus the bundled-runtime check prevents an installer that launches but cannot run Codex.
 
@@ -543,7 +563,7 @@ npm run verify:package:mac
 npm run verify:package:win
 ```
 
-CI performs this inspection before uploading either installer. A package is not considered successful merely because Electron produced a DMG or EXE.
+CI performs this inspection before uploading either installer. Release CI additionally verifies the native signature, macOS notarization ticket, and matching updater metadata. A package is not considered successful merely because Electron produced a DMG or EXE.
 
 ## Troubleshooting
 
@@ -573,7 +593,7 @@ Install the artifact matching the operating system and CPU architecture. For loc
 
 ### A chat still appears after deletion
 
-Use the sidebar or toolbar delete control and confirm the dialog. The app cancels an active run, removes the conversation from `conversations.json`, and selects another session. If the state file is not writable, inspect the per-user application-data directory and its permissions.
+Use the sidebar or toolbar delete control and confirm the dialog. The app cancels an active run, removes the conversation from the local SQLite snapshot, and selects another session. If the database is not writable, inspect the per-user application-data directory and its permissions.
 
 ### No downloadable installer appears
 
@@ -596,6 +616,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 - [OpenRouter integration](docs/OPENROUTER.md)
 - [Security and privacy](docs/SECURITY.md)
 - [Development and release workflow](docs/DEVELOPMENT.md)
+- [Release operations](docs/RELEASING.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Current boundaries
@@ -603,9 +624,9 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 - Packaged targets are Apple Silicon macOS and Windows x64.
 - Native screen and Accessibility automation are macOS-only.
 - Codex skills, MCP servers, and connectors do not automatically become OpenRouter tools.
-- The remote runner supports bounded file and command capabilities, not remote screen or UI automation.
+- The remote-runner command defaults to bounded file and command compatibility mode. Durable model jobs require `--agent-host`; browser and Linux desktop screens additionally require explicit provider flags and host-local software.
 - OpenRouter web research currently uses a dedicated research model constant before final synthesis.
-- Packaged development builds are unsigned and not notarized.
+- Verify-workflow packages are unsigned development artifacts; only tagged release-workflow packages are distributable.
 
 ## Independent implementation notice
 

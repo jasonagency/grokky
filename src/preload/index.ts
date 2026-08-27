@@ -1,9 +1,18 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSnapshot, AppSettings, ConversationPatch, GrokkyApi } from "../shared/contracts";
+import type { ProjectionChange } from "../shared/control-plane-contracts";
 import { IPC } from "../shared/contracts";
 import { userFacingError } from "../shared/errors";
 
 let snapshotListener: ((_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) => void) | undefined;
+let projectionListener: ((_event: Electron.IpcRendererEvent, change: ProjectionChange) => void) | undefined;
+let openTaskCallback: ((taskId: string) => void) | undefined;
+let queuedTaskId: string | undefined;
+
+ipcRenderer.on(IPC.taskOpen, (_event, taskId: string) => {
+  if (openTaskCallback) openTaskCallback(taskId);
+  else queuedTaskId = taskId;
+});
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   try {
@@ -26,13 +35,25 @@ const api: GrokkyApi = {
   updateSettings: (patch: Partial<AppSettings>) => invoke(IPC.settingsUpdate, patch),
   refreshProviderStatuses: () => invoke(IPC.providersRefresh),
   getCapabilities: () => invoke(IPC.capabilitiesGet),
+  refreshMcpCapabilities: () => invoke(IPC.mcpRefresh),
   setSkillEnabled: (path, enabled) => invoke(IPC.skillToggle, path, enabled),
   setMcpEnabled: (id, enabled) => invoke(IPC.mcpToggle, id, enabled),
+  setMcpToolClassification: (name, classification) => invoke(IPC.mcpToolClassify, name, classification),
+  beginMcpAuthorization: (id) => invoke(IPC.mcpAuthBegin, id),
+  completeMcpAuthorization: (id, code) => invoke(IPC.mcpAuthComplete, id, code),
+  revokeMcpAuthorization: (id) => invoke(IPC.mcpAuthRevoke, id),
   setConnectorEnabled: (id, enabled) => invoke(IPC.connectorToggle, id, enabled),
   getAgents: () => invoke(IPC.agentsGet),
   createAgent: (draft) => invoke(IPC.agentCreate, draft),
   updateAgent: (id, draft) => invoke(IPC.agentUpdate, id, draft),
   deleteAgent: (id) => invoke(IPC.agentDelete, id),
+  sendAgentMessage: (input) => invoke(IPC.agentMessageSend, input),
+  acknowledgeAgentMessage: (messageId, agentId) => invoke(IPC.agentMessageAcknowledge, messageId, agentId),
+  proposeAgentMemory: (input) => invoke(IPC.agentMemoryPropose, input),
+  reviewAgentMemory: (id, decision) => invoke(IPC.agentMemoryReview, id, decision),
+  createAgentRoutine: (input) => invoke(IPC.agentRoutineCreate, input),
+  updatePersistentAgent: (agentId, action) => invoke(IPC.persistentAgentUpdate, agentId, action),
+  duplicatePersistentAgent: (agentId, name) => invoke(IPC.persistentAgentDuplicate, agentId, name),
   setComputerAccessEnabled: (enabled) => invoke(IPC.computerEnabled, enabled),
   setComputerCapability: (id, level) => invoke(IPC.computerCapability, id, level),
   requestComputerPermission: (id) => invoke(IPC.computerPermission, id),
@@ -42,11 +63,42 @@ const api: GrokkyApi = {
   revokeComputer: (deviceId) => invoke(IPC.computerRevoke, deviceId),
   updateComputerNetworkAllowlist: (domains) => invoke(IPC.computerNetworkAllowlist, domains),
   resolveComputerApproval: (id, decision) => invoke(IPC.computerApprovalResolve, id, decision),
+  takeoverScreen: (leaseId, epoch) => invoke(IPC.computerScreenTakeover, leaseId, epoch),
+  returnScreen: (leaseId, epoch) => invoke(IPC.computerScreenReturn, leaseId, epoch),
+  lockScreen: (leaseId, epoch) => invoke(IPC.computerScreenLock, leaseId, epoch),
+  createTaskGoal: (draft) => invoke(IPC.taskGoalCreate, draft),
+  actOnTask: (taskId, action) => invoke(IPC.taskAction, taskId, action),
+  integrateTaskWorkspace: (leaseId, targetRef) => invoke(IPC.taskWorkspaceIntegrate, leaseId, targetRef),
+  controlTask: (taskId, control) => invoke(IPC.taskControl, taskId, control),
+  updateControlPolicies: (patch) => invoke(IPC.controlPoliciesUpdate, patch),
+  queryTrace: (query) => invoke(IPC.traceQuery, query),
+  replayTrace: (request) => invoke(IPC.traceReplay, request),
+  getEvaluations: () => invoke(IPC.evalGet),
+  promoteEvaluation: (input) => invoke(IPC.evalPromote, input),
+  gradeEvaluation: (caseId, version, trace, metrics) => invoke(IPC.evalGrade, caseId, version, trace, metrics),
+  compareEvaluations: (baselineId, candidateId) => invoke(IPC.evalCompare, baselineId, candidateId),
+  checkForUpdate: () => invoke(IPC.updateCheck),
+  downloadUpdate: () => invoke(IPC.updateDownload),
+  installUpdate: () => invoke(IPC.updateInstall),
+  setUpdateChannel: (channel) => invoke(IPC.updateChannel, channel),
   openExternal: (url) => invoke(IPC.externalOpen, url),
   onSnapshot: (listener: (snapshot: AppSnapshot) => void) => {
     if (snapshotListener) ipcRenderer.removeListener(IPC.snapshotChanged, snapshotListener);
     snapshotListener = (_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) => listener(snapshot);
     ipcRenderer.on(IPC.snapshotChanged, snapshotListener);
+  },
+  onProjection: (listener: (change: ProjectionChange) => void) => {
+    if (projectionListener) ipcRenderer.removeListener(IPC.projectionChanged, projectionListener);
+    projectionListener = (_event: Electron.IpcRendererEvent, change: ProjectionChange) => listener(change);
+    ipcRenderer.on(IPC.projectionChanged, projectionListener);
+  },
+  onOpenTask: (listener: (taskId: string) => void) => {
+    openTaskCallback = listener;
+    if (queuedTaskId) {
+      const taskId = queuedTaskId;
+      queuedTaskId = undefined;
+      queueMicrotask(() => openTaskCallback?.(taskId));
+    }
   },
 };
 

@@ -37,10 +37,12 @@ flowchart LR
   subgraph Trusted main process
     IPC[Validated IPC handlers]
     CONTROLLER[MainController]
-    STATE[StateStore]
+    STATE[StateStore compatibility facade]
+    STORAGE[SQLite storage worker]
     AGENTS[AgentService]
     CAPS[CapabilitiesService]
     ACCESS[ComputerAccessService]
+    REGISTRY[Harness registry]
     CODEXPROVIDER[Codex provider]
     ORPROVIDER[OpenRouter provider]
   end
@@ -49,11 +51,13 @@ flowchart LR
   PRELOAD --> IPC
   IPC --> CONTROLLER
   CONTROLLER --> STATE
+  STATE --> STORAGE
   CONTROLLER --> AGENTS
   CONTROLLER --> CAPS
   CONTROLLER --> ACCESS
-  CONTROLLER --> CODEXPROVIDER
-  CONTROLLER --> ORPROVIDER
+  CONTROLLER --> REGISTRY
+  REGISTRY --> CODEXPROVIDER
+  REGISTRY --> ORPROVIDER
 ```
 
 The renderer runs with:
@@ -73,21 +77,28 @@ The renderer receives complete application snapshots. It never receives a provid
 | Shared contracts | `src/shared/contracts.ts` | Serializable domain types, provider IDs, IPC names, UI snapshots |
 | Runtime validation | `src/shared/validation.ts` | Validate every renderer-controlled IPC payload |
 | Preload | `src/preload/index.ts` | Convert the allowlisted API into `ipcRenderer.invoke` calls |
-| Controller | `src/main/controller.ts` | Coordinate conversations, providers, tools, state, cancellation, and snapshots |
-| Codex adapter | `src/main/providers/codex-provider.ts` | Configure SDK threads and normalize SDK events |
-| OpenRouter adapter | `src/main/providers/openrouter-provider.ts` | Run chat, tools, web research, and crew synthesis |
+| Controller | `src/main/controller.ts` | Coordinate conversations, harness requirements, tools, state, cancellation, and snapshots |
+| Harness registry | `src/main/harnesses` | Resolve legacy provider selections, negotiate capabilities, validate events, and dispatch versioned adapters |
+| Codex compatibility adapter | `src/main/harnesses/codex-sdk-adapter.ts` | Describe SDK capabilities and wrap the existing Codex provider |
+| OpenRouter compatibility adapter | `src/main/harnesses/openrouter-adapter.ts` | Resolve credentials and wrap the existing OpenRouter provider |
 | Access gate | `src/main/computer-access.ts` | Resolve policy, approvals, target device, browser safety, and audit |
 | Workspace tools | `src/main/workspace-tools.ts` | Enforce path, file, edit, and command boundaries |
 | Native host | `src/main/computer-host-electron.ts` | Screen capture, Accessibility actions, and encrypted token storage |
 | Remote runner | `src/main/runner-service.ts` | Expose paired, bounded workspace tools on another computer |
 | Capabilities | `src/main/capabilities.ts` | Discover and toggle Codex skills, MCP servers, and connectors |
 | Agents | `src/main/agents.ts` | Discover, create, update, and delete Codex TOML agents |
-| State | `src/main/state-store.ts` | Normalize, migrate, and atomically persist local state |
+| State facade | `src/main/state-store.ts` | Normalize snapshots, import legacy JSON once, and preserve the controller contract |
+| Storage | `src/main/storage` | Own SQLite, forward-only migrations, serialized requests, and repositories |
+| Control plane | `src/main/control-plane` | Validate ordered domain events, update projections transactionally, rebuild state, and publish bounded changes |
 | Renderer | `src/renderer/src` | Present sessions, messages, activity, crews, settings, and approvals |
 
 ## Snapshot state model
 
-The main process is authoritative. React does not optimistically own durable conversation state.
+The main process is authoritative. React does not optimistically own durable conversation state. `StateStore` continues to write a compatibility snapshot while ordered events and projections take ownership of run history.
+
+Run history now also flows through stable, append-only control-plane events. Each aggregate has a monotonic sequence; duplicate event IDs are idempotent, and sequence gaps are quarantined as diagnostics. The storage worker commits an event, its conversation projection, and any content-addressed artifact in one transaction. On restart, the projector can rebuild its bounded active-run view from events and referenced artifacts alone. The renderer receives sanitized projection changes over a dedicated IPC channel and retains full snapshot retrieval for startup and gap recovery.
+
+Live task commands are persisted before delivery. Stop aborts and fences an active attempt immediately; pause remains queued until the next model, tool, MCP, or terminal-event boundary, checkpoints a writable task branch when possible, and then fences the attempt as paused. A resumed attempt reuses its clean completed task worktree so the checkpoint remains in its execution context. Closing the last window keeps locally owned queued or running work alive in the tray. A full quit with active local work requires an explicit stop choice. Remote host-owned work does not keep the desktop process alive. OS notification clicks restore the window and open the owning task through the typed preload bridge.
 
 ```mermaid
 stateDiagram-v2
@@ -106,7 +117,7 @@ Every meaningful mutation follows the same pattern:
 
 1. Validate the request in IPC or the controller.
 2. Mutate main-process state.
-3. Queue an atomic state save when the change is durable.
+3. Queue a transactional SQLite snapshot write through the storage worker when the change is durable.
 4. Publish a full `AppSnapshot` to the renderer.
 5. Let React derive view state from the new snapshot.
 
@@ -314,8 +325,17 @@ Runner endpoints:
 | `POST /pair` | Six-digit one-time code | Return the persistent bearer token and rotate the code |
 | `POST /test` | Bearer token | Test file or command capability |
 | `POST /execute` | Bearer token | Run one bounded workspace operation |
+| `POST /host/jobs` | Bearer token | Idempotently submit one durable harness attempt |
+| `POST /host/events` | Bearer token | Read signed ordered host events after a cursor |
+| `POST /host/control` | Bearer token | Cancel or approve work at a supported durable boundary |
+| `POST /host/routines` | Bearer token | Idempotently register or advance a versioned routine graph |
+| `POST /host/screens/*` | Bearer token | Lease, capture, control, and revoke agent screens |
 
 The runner's disk state uses mode `0600`. Grokky stores only an Electron `safeStorage` encrypted form of the bearer token. HTTP transport is designed for loopback or an encrypted private overlay network, not direct public exposure.
+
+With `--agent-host`, the runner constructs the same Codex App Server, Codex SDK fallback, OpenRouter, and Pi registry used by the desktop, but resolves readiness and credentials locally. Grokky-controlled workspace tools remain bounded by the runner root and startup flags. The protocol uses independently versioned job and routine submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. The host scheduler persists routine definitions, occurrence keys, graph dependencies, and job events before execution; this lets due work start without a desktop process. Closing the desktop detaches monitoring without failing the attempt. Reconnecting replays from the paired device's durable cursor, records unattended routine activity, and settles the original ordinary task. Submission and occurrence IDs are stable, so reconnecting or retrying does not create duplicate work.
+
+Browser screen provisioning connects to a loopback Chrome DevTools endpoint and opens separate pages in one persistent browser profile. Linux desktop provisioning leases only the explicit non-root X displays named at startup. Both flow through `ScreenSessionManager`, so screenshots, input, takeover, locks, expiration, audit history, and shared-trust labels use one contract.
 
 ## Skills, MCP, connectors, and agents
 
@@ -338,6 +358,8 @@ flowchart LR
 
 Capability and agent writes are atomic. The settings layer edits only direct supported configuration blocks and preserves unrelated Codex configuration. Built-in agents cannot be overwritten or deleted; they can be duplicated into a user-owned definition.
 
+TOML files remain the portable role definition. The SQLite team runtime imports those roles and adds persistent harness session references, mailbox cursors, operator-reviewed memory, notification preferences, and versioned routines. Mailbox handoffs retain both ownership metadata and the receiving acknowledgement. Proposed memory is visible to the operator but is excluded from reviewed context until accepted. Local routine occurrence keys are calculated in the configured timezone and persisted before task creation. Remote routines are versioned into the host spool, where their occurrence keys and stable node jobs are persisted before advancement. Both paths prevent restart, reconnect, or daylight-saving transitions from enqueueing an occurrence twice.
+
 ## Persistence model
 
 ```mermaid
@@ -353,7 +375,7 @@ erDiagram
   COMPUTER_ACCESS ||--o{ AUDIT_ENTRY : records
 ```
 
-Persisted state intentionally includes user content and may be sensitive, but it lives outside the repository under Electron's per-user data directory. It is written with mode `0600` through a `.next` file followed by rename.
+Persisted state intentionally includes user content and may be sensitive, but it lives outside the repository under Electron's per-user data directory. The database file uses mode `0600`, WAL journaling, and a single worker-owned connection. A retained legacy JSON file is read only during the idempotent first import.
 
 Grokky does not persist:
 
@@ -374,9 +396,9 @@ The cleanest future seams are:
 
 - Add a provider behind the normalized `ProviderEvent` contract.
 - Add a local or remote tool behind `ComputerToolName`, capability mapping, and access audit.
-- Add persistence migrations in `StateStore.load` without exposing raw disk data to React.
-- Add OpenRouter MCP or connector support by converting external tool definitions into the bounded tool-loop contract.
-- Add remote screen or automation only after the runner has a transport, permission, and image-security design appropriate for it.
+- Add forward-only persistence migrations under `src/main/storage` without exposing raw disk data to React.
+- Add connector runtimes to OpenRouter only by converting their external tool definitions into the bounded, classified MCP/tool-loop contract.
+- Add production screen providers behind the existing remote screen transport only when the provisioned host has an explicit permission and image-security design.
 
 ## Independent implementation boundary
 

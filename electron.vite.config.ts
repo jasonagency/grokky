@@ -8,6 +8,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
+          "database-worker": resolve("src/main/storage/database-worker.ts"),
           index: resolve("src/main/index.ts"),
           "runner-service": resolve("src/main/runner-service.ts"),
         },

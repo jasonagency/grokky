@@ -1,14 +1,40 @@
-import { app, BrowserWindow, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from "electron";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MainController } from "./controller";
 import { ComputerAccessService } from "./computer-access";
 import { createElectronComputerHost, createElectronComputerSecrets } from "./computer-host-electron";
 import { registerIpc } from "./ipc";
-import { StateStore } from "./state-store";
+import { StateStore, sqlitePathForLegacy } from "./state-store";
+import { WorkerDatabaseClient } from "./storage/database-client";
+import { ControlPlaneService } from "./control-plane/control-plane-service";
+import { TaskScheduler } from "./control-plane/scheduler";
+import { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
+import { IntegrationQueue } from "./workspaces/integration-queue";
+import { ControlRuntimeRepository } from "./control-plane/control-runtime-repository";
+import { SteeringService } from "./control-plane/steering-service";
+import { NotificationService } from "./control-plane/notification-service";
 import { IPC } from "../shared/contracts";
+import { McpAuthManager } from "./tools/mcp-auth";
+import { McpClientManager } from "./tools/mcp-client-manager";
+import { ToolGateway } from "./tools/tool-gateway";
+import { TraceService } from "./quality/trace-service";
+import { ReplayService } from "./quality/replay-service";
+import { EvalService } from "./quality/eval-service";
+import { AgentRuntimeService, TeamRepository } from "./team/agent-runtime-service";
+import { MailboxService } from "./team/mailbox-service";
+import { MemoryService } from "./team/memory-service";
+import { RoutineService } from "./team/routine-service";
+import { ScreenSessionManager } from "../runner/screen-session-manager";
+import { createElectronUpdateAdapter, DisabledUpdateAdapter, UpdateService } from "./update-service";
 
 let mainWindow: BrowserWindow | null = null;
+let stateStore: StateStore | null = null;
+let mainController: MainController | null = null;
+let tray: Tray | null = null;
+let databaseClosed = false;
+let databaseClosing = false;
+let explicitQuitRequested = false;
 
 if (process.env.GROKKY_USER_DATA_PATH) app.setPath("userData", process.env.GROKKY_USER_DATA_PATH);
 
@@ -44,21 +70,92 @@ async function createWindow(controller: MainController): Promise<void> {
   });
 
   controller.attachWindow(mainWindow);
+  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.on("closed", () => { mainWindow = null; });
   if (process.env.ELECTRON_RENDERER_URL) await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   else await mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+}
+
+async function showTask(taskId?: string): Promise<void> {
+  if (!mainController) return;
+  if (!mainWindow || mainWindow.isDestroyed()) await createWindow(mainController);
+  mainWindow?.show();
+  mainWindow?.focus();
+  if (taskId) mainWindow?.webContents.send(IPC.taskOpen, taskId);
+}
+
+function ensureTray(): void {
+  if (tray || !app.isReady()) return;
+  const image = nativeImage.createFromPath(join(app.getAppPath(), "build/icon-mascot.png")).resize({ width: 18, height: 18 });
+  tray = new Tray(image);
+  tray.setToolTip("Grokky is running local agent work");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Show Grokky", click: () => { void showTask(); } },
+    { type: "separator" },
+    { label: "Quit and stop local work", click: () => { explicitQuitRequested = true; app.quit(); } },
+  ]));
+  tray.on("click", () => { void showTask(); });
 }
 
 app.whenReady().then(async () => {
+  const homeDirectory = process.env.GROKKY_SMOKE_HOME_PATH || app.getPath("home");
+  const legacyStatePath = join(app.getPath("userData"), "conversations.json");
+  const database = new WorkerDatabaseClient(sqlitePathForLegacy(legacyStatePath));
+  stateStore = new StateStore(legacyStatePath, homeDirectory, {
+    database,
+  });
+  const worktreeRoot = join(app.getPath("userData"), "worktrees");
+  const workspaceLeases = new WorkspaceLeaseManager(database, worktreeRoot);
+  const integrationQueue = new IntegrationQueue(worktreeRoot, (record) => workspaceLeases.recordIntegration(record));
+  const controlRuntime = new ControlRuntimeRepository(database);
+  const steering = new SteeringService(controlRuntime);
+  const notifications = new NotificationService(controlRuntime, {
+    show: async (record) => {
+      if (!Notification.isSupported()) return false;
+      const notification = new Notification({ title: record.title, body: record.body });
+      if (record.taskId) notification.on("click", () => { void showTask(record.taskId); });
+      notification.show();
+      return true;
+    },
+  });
+  const electronSecrets = createElectronComputerSecrets();
+  const controlPlane = new ControlPlaneService(database);
+  const teamRepository = new TeamRepository(database);
+  const updateAdapter = app.isPackaged
+    ? await createElectronUpdateAdapter("jasonagency/grokky")
+    : new DisabledUpdateAdapter();
+  const updates = new UpdateService(updateAdapter, {
+    currentVersion: app.getVersion(),
+    getRestartBlockers: () => mainController?.updateRestartBlockers() ?? ["Application startup is still in progress"],
+  });
+  const screenSessions = new ScreenSessionManager([], Date.now, 5 * 60_000, (audit) => { void controlPlane.record({ aggregateId: audit.leaseId, source: "screen-session", type: "screen.recorded", payload: { audit } }).catch(() => undefined); });
   const controller = new MainController(
-    new StateStore(join(app.getPath("userData"), "conversations.json"), app.getPath("home")),
-    app.getPath("home"),
+    stateStore,
+    homeDirectory,
     app.getVersion(),
     new ComputerAccessService({
       host: createElectronComputerHost(join(app.getPath("temp"), "grokky-captures")),
-      secrets: createElectronComputerSecrets(),
+      secrets: electronSecrets,
+      screens: screenSessions,
     }),
+    controlPlane,
+    undefined,
+    new TaskScheduler(database, { concurrency: 4, leaseDurationMs: 30_000 }),
+    workspaceLeases,
+    integrationQueue,
+    steering,
+    notifications,
+    new ToolGateway(new McpClientManager(new McpAuthManager(join(app.getPath("userData"), "mcp-auth.json"), electronSecrets))),
+    new TraceService(controlPlane),
+    new ReplayService(),
+    new EvalService(database),
+    new AgentRuntimeService(teamRepository),
+    new MailboxService(teamRepository),
+    new MemoryService(teamRepository),
+    new RoutineService(teamRepository),
+    updates,
   );
+  mainController = controller;
   await controller.initialize();
   registerIpc(controller);
   await createWindow(controller);
@@ -84,10 +181,47 @@ app.whenReady().then(async () => {
       if (process.env.GROKKY_SMOKE_SCREENSHOT_PATH) {
         const smokeView = process.env.GROKKY_SMOKE_VIEW;
         const smokeConversationCount = controller.snapshot().conversations.length;
-        if (smokeView === "light-theme") {
+        if (smokeView === "update-banner") {
+          const snapshot = controller.snapshot();
+          snapshot.update = {
+            status: "blocked",
+            channel: "stable",
+            info: {
+              version: "9.4.0",
+              channel: "stable",
+              releaseName: "Grokky 9.4",
+              releaseUrl: "https://github.com/jasonagency/grokky/releases/tag/v9.4.0",
+              files: [{ url: "https://github.com/jasonagency/grokky/releases/download/v9.4.0/Grokky.dmg", sha512: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" }],
+            },
+            blockers: ["1 local conversation is still running", "1 workspace integration is unresolved"],
+          };
+          mainWindow.webContents.send(IPC.snapshotChanged, snapshot);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } else if (smokeView === "light-theme") {
           await mainWindow.webContents.executeJavaScript(`document.documentElement.dataset.theme = 'light'`);
         } else if (smokeView === "session-delete") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.focus()`);
+        } else if (smokeView === "trace-lab") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-view="quality"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        } else if (smokeView === "team-workspace") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="agents"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('.agent-workspace')?.scrollIntoView({ block: 'start' })`);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } else if (smokeView === "agent-computer") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="computer"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const snapshot = controller.snapshot();
+          snapshot.computerAccess.screens = { audit: [], history: [], leases: [
+            { id: "screen-smoke-a", agentId: "researcher", providerSessionId: "page-a", kind: "browser", epoch: 3, controller: "agent", status: "active", delivery: "stream", sharedTrustBoundary: true, acquiredAt: Date.now() - 1_000, expiresAt: Date.now() + 60_000 },
+            { id: "screen-smoke-b", agentId: "builder", providerSessionId: "desktop-b", kind: "desktop", epoch: 1, controller: "operator", status: "active", delivery: "snapshot", sharedTrustBoundary: true, acquiredAt: Date.now() - 1_000, expiresAt: Date.now() + 60_000 },
+          ] };
+          mainWindow.webContents.send(IPC.snapshotChanged, snapshot);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('.agent-computer-view')?.scrollIntoView({ block: 'start' })`);
         } else if (smokeView === "session-delete-click") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.click()`);
           await new Promise((resolve) => setTimeout(resolve, 150));
@@ -285,6 +419,33 @@ app.whenReady().then(async () => {
             await mainWindow.webContents.executeJavaScript(`document.querySelector('.crew-picker-list > button:last-child')?.click()`);
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
+        } else if (smokeView === "task-graph" || smokeView === "notification-deep-link") {
+          const suffix = Date.now().toString(36);
+          const childTaskId = `smoke-child-${suffix}`;
+          await controller.createTaskGoal({
+            id: `smoke-goal-${suffix}`,
+            title: "Ship durable orchestration",
+            objective: "Verify the queue is readable and operable after restart",
+            nodes: [
+              { id: `smoke-root-${suffix}`, title: "Recover active leases", description: "Reconcile the last checkpoint", priority: 8, assignment: { harnessId: "smoke-fixture" } },
+              { id: childTaskId, title: "Notify the operator", description: "Wait for recovery to succeed", dependsOn: [`smoke-root-${suffix}`], priority: 5, assignment: { harnessId: "smoke-fixture" } },
+            ],
+          });
+          if (smokeView === "notification-deep-link") mainWindow.webContents.send(IPC.taskOpen, childTaskId);
+          else await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const taskGraphReady = await mainWindow.webContents.executeJavaScript(`(() => {
+            const graph = document.querySelector('[aria-label="Task graph and queue"]');
+            const controls = document.querySelector('[aria-label="Live steering controls"]');
+            const notifiedTask = document.querySelector('[aria-label="Inspect Notify the operator"]');
+            const first = graph?.querySelector('button.task-node-card');
+            if (!(first instanceof HTMLButtonElement) || !(controls instanceof HTMLElement)) return false;
+            first.focus();
+            return document.activeElement === first
+              && graph?.querySelectorAll('[role="listitem"]').length === 2
+              && (${JSON.stringify(smokeView)} !== "notification-deep-link" || notifiedTask instanceof HTMLElement);
+          })()`);
+          if (!taskGraphReady) throw new Error("task graph smoke fixture was not keyboard-readable");
         } else if (smokeView === "agents" || smokeView === "agent-editor" || smokeView === "agent-select") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="agents"]')?.click()`);
           if (smokeView === "agent-editor" || smokeView === "agent-select") {
@@ -299,6 +460,11 @@ app.whenReady().then(async () => {
           }
         } else if (smokeView === "skills") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="skills"]')?.click()`);
+        } else if (smokeView === "mcp") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="skills"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-view="mcp"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
         } else if (smokeView === "computer" || smokeView === "computer-pair") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="computer"]')?.click()`);
           if (smokeView === "computer-pair") {
@@ -406,6 +572,9 @@ app.whenReady().then(async () => {
               const rect = button.getBoundingClientRect();
               if (rect.height < 30) violations.push('.sidebar-footer button ' + index + ' collapsed');
             });
+            const providerButtons = [...document.querySelectorAll('.provider-switch button')];
+            if (providerButtons.length !== 3) violations.push('provider switch does not expose Codex, OpenRouter, and Pi');
+            if (!providerButtons.some((button) => button.textContent?.trim() === 'Pi')) violations.push('Pi provider button is missing');
             if (['session-delete', 'session-delete-click'].includes(${JSON.stringify(smokeView)})) {
               const entry = document.querySelector('.session-entry')?.getBoundingClientRect();
               const item = document.querySelector('.session-item')?.getBoundingClientRect();
@@ -687,5 +856,39 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  const work = mainController?.localBackgroundWork();
+  if (work && (work.conversationIds.length || work.taskIds.length)) ensureTray();
+  else if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", (event) => {
+  if (!stateStore || databaseClosed) return;
+  event.preventDefault();
+  if (databaseClosing) return;
+  const work = mainController?.localBackgroundWork();
+  if (!explicitQuitRequested && work && (work.conversationIds.length || work.taskIds.length)) {
+    const count = work.conversationIds.length + work.taskIds.length;
+    const choice = dialog.showMessageBoxSync({
+      type: "warning",
+      title: "Stop local agent work?",
+      message: `${count} local ${count === 1 ? "run is" : "runs are"} still active.`,
+      detail: "Keep Grokky running in the tray, or checkpoint what can be recovered and stop the active local work before quitting.",
+      buttons: ["Keep Running", "Quit and Stop Work"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (choice === 0) { ensureTray(); return; }
+    explicitQuitRequested = true;
+  }
+  databaseClosing = true;
+  const shutdown = mainController ? mainController.shutdown() : Promise.resolve();
+  void shutdown
+    .then(() => stateStore?.close())
+    .catch((error) => console.error("Failed to close the control-plane database", error))
+    .finally(() => {
+      databaseClosed = true;
+      tray?.destroy();
+      tray = null;
+      app.quit();
+    });
 });

@@ -11,8 +11,15 @@ import type {
   ComputerPermissionStatus,
   Conversation,
 } from "../shared/contracts";
+import type { WorkspaceLease } from "../shared/control-plane-contracts";
 import type { PersistedComputerAccess, PersistedRemoteDevice } from "./state-store";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
+import { assertCompatibleProtocol, assertSecureRemoteEndpoint } from "../shared/remote-protocol";
+import type { ScreenSessionManager } from "../runner/screen-session-manager";
+import { FetchHostTransport, HostClient } from "./remote/host-client";
+import type { RemoteControlCommand, RemoteEventFrame, RemoteJobRecord, RemoteJobRequest, RemoteRoutineRecord, RemoteRoutineRegistration } from "../shared/remote-protocol";
+import type { AgentScreenSnapshot } from "../shared/remote-protocol";
+import { FetchRemoteScreenTransport, ScreenClient } from "./remote/screen-client";
 
 export type ComputerToolName = WorkspaceToolName | "browse_url" | "capture_screen" | "open_application" | "click_screen" | "type_text";
 
@@ -33,9 +40,10 @@ const capabilityCopy: Record<ComputerCapabilityId, Pick<ComputerCapability, "lab
   browser: { label: "Browser and web pages", description: "Open approved public web pages and return readable page content." },
   screen: { label: "Screen visibility", description: "Capture the current display so an agent can inspect visible application state." },
   automation: { label: "Application control", description: "Open apps, click coordinates, and type text through supported system accessibility controls." },
+  mcp: { label: "MCP tools", description: "Call enabled Model Context Protocol tools through Grokky's policy and audit gateway." },
 };
 
-const localCapabilities: ComputerCapabilityId[] = ["files", "commands", "browser", "screen", "automation"];
+const localCapabilities: ComputerCapabilityId[] = ["files", "commands", "browser", "screen", "automation", "mcp"];
 const workspaceTools = new Set<WorkspaceToolName>(["list_files", "search_files", "read_file", "create_file", "edit_file", "run_command"]);
 
 export function capabilityForTool(name: ComputerToolName): ComputerCapabilityId {
@@ -72,12 +80,7 @@ function defaultSecrets(): ComputerAccessSecrets {
 }
 
 function normalizedEndpoint(value: string): string {
-  const url = new URL(value.trim());
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Runner endpoint must use http or https");
-  url.pathname = url.pathname.replace(/\/$/, "");
-  url.search = "";
-  url.hash = "";
-  return url.toString().replace(/\/$/, "");
+  return assertSecureRemoteEndpoint(value.trim());
 }
 
 function isPrivateAddress(address: string): boolean {
@@ -175,10 +178,13 @@ async function probeReadableRoot(root: string): Promise<string> {
 export class ComputerAccessService {
   private readonly host: ComputerHostAdapter;
   private readonly secrets: ComputerAccessSecrets;
+  private readonly screens?: ScreenSessionManager;
+  private readonly remoteScreens = new Map<string, AgentScreenSnapshot>();
 
-  constructor(options: { host?: ComputerHostAdapter; secrets?: ComputerAccessSecrets } = {}) {
+  constructor(options: { host?: ComputerHostAdapter; secrets?: ComputerAccessSecrets; screens?: ScreenSessionManager } = {}) {
     this.host = options.host ?? defaultHostAdapter();
     this.secrets = options.secrets ?? defaultSecrets();
+    this.screens = options.screens;
   }
 
   snapshot(state: PersistedComputerAccess, root: string, pendingApproval?: ComputerAccessSnapshot["pendingApproval"]): ComputerAccessSnapshot {
@@ -189,7 +195,7 @@ export class ComputerAccessService {
       ...capabilityCopy[id],
       level: state.grants[id],
       permission: activeRemote ? "not-required" : this.host.permissionStatus(id),
-      available: activeCapabilities.includes(id),
+      available: id === "mcp" || activeCapabilities.includes(id),
     }));
     const devices: ComputerDevice[] = [
       {
@@ -222,6 +228,7 @@ export class ComputerAccessService {
       networkAllowlist: [...state.networkAllowlist],
       auditLog: [...state.auditLog].sort((left, right) => right.createdAt - left.createdAt).slice(0, 120),
       ...(pendingApproval ? { pendingApproval } : {}),
+      ...(activeRemote ? (this.remoteScreens.has(activeRemote.id) ? { screens: structuredClone(this.remoteScreens.get(activeRemote.id)!) } : {}) : this.screens ? { screens: this.screens.snapshot() } : {}),
     };
   }
 
@@ -239,12 +246,14 @@ export class ComputerAccessService {
     const payload = await jsonRequest<{
       device: { id: string; name: string; platform: string; root: string; capabilities: ComputerCapabilityId[] };
       token: string;
+      protocol?: { major: number; minor: number };
     }>(`${endpoint}/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: code.trim() }),
     });
     if (!payload.device?.id || !payload.token) throw new Error("Runner returned an invalid pairing response");
+    if (payload.protocol) assertCompatibleProtocol(payload.protocol);
     const record: PersistedRemoteDevice = {
       id: payload.device.id,
       name: payload.device.name || "Remote computer",
@@ -254,6 +263,7 @@ export class ComputerAccessService {
       encryptedToken: this.secrets.seal(payload.token),
       capabilities: payload.device.capabilities.filter((capability) => localCapabilities.includes(capability)),
       lastSeenAt: Date.now(),
+      eventCursor: 0,
       revoked: false,
     };
     const existing = state.remoteDevices.findIndex((device) => device.id === record.id);
@@ -278,6 +288,7 @@ export class ComputerAccessService {
   }
 
   async test(state: PersistedComputerAccess, capability: ComputerCapabilityId, conversation: Conversation): Promise<string> {
+    if (capability === "mcp") return "MCP gateway policy is available in the Electron main process.";
     if (state.activeDeviceId !== state.localDeviceId) {
       const device = this.remoteDevice(state);
       const payload = await this.remoteRequest<{ ok: boolean; detail: string }>(device, "/test", { capability });
@@ -303,6 +314,7 @@ export class ComputerAccessService {
     name: ComputerToolName;
     args: Record<string, unknown>;
     approvedTarget?: boolean;
+    workspaceLease?: WorkspaceLease;
   }): Promise<string> {
     const { state, conversation, name, args } = options;
     if (!state.enabled) throw new Error("Computer access is disabled");
@@ -320,6 +332,7 @@ export class ComputerAccessService {
     if (workspaceTools.has(name as WorkspaceToolName)) {
       return executeWorkspaceTool({
         root: conversation.workingDirectory,
+        lease: options.workspaceLease,
         mode: conversation.sandboxMode,
         allowCommands: conversation.allowCommands,
         name: name as WorkspaceToolName,
@@ -343,6 +356,54 @@ export class ComputerAccessService {
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
+  remoteHostClient(state: PersistedComputerAccess, deviceId: string): HostClient {
+    const device = state.remoteDevices.find((item) => item.id === deviceId && !item.revoked);
+    if (!device) throw new Error("Remote agent host is unavailable or revoked");
+    return new HostClient(device.endpoint, this.remoteCredential(device), new FetchHostTransport(device.endpoint));
+  }
+
+  async submitRemoteJob(state: PersistedComputerAccess, deviceId: string, request: RemoteJobRequest): Promise<{ client: HostClient; job: RemoteJobRecord }> {
+    const client = this.remoteHostClient(state, deviceId);
+    const capabilities = await client.connect();
+    if (capabilities.hostId !== deviceId) throw new Error("Paired device identity does not match the remote agent host");
+    if (!capabilities.harnesses.includes(request.harnessId)) throw new Error(`Remote host does not have a ready ${request.harnessId} harness`);
+    const job = await client.submit(request);
+    const device = state.remoteDevices.find((item) => item.id === deviceId);
+    if (device) device.lastSeenAt = Date.now();
+    return { client, job };
+  }
+
+  remoteEvents(client: HostClient, afterCursor: number): Promise<RemoteEventFrame[]> { return client.events(afterCursor); }
+  remoteControl(client: HostClient, command: RemoteControlCommand) { return client.control(command); }
+  async upsertRemoteRoutine(state: PersistedComputerAccess, deviceId: string, routine: RemoteRoutineRegistration): Promise<RemoteRoutineRecord> { const client = this.remoteHostClient(state, deviceId); const capabilities = await client.connect(); if (capabilities.hostId !== deviceId) throw new Error("Paired device identity does not match the remote agent host"); return client.upsertRoutine(routine); }
+
+  async pollRemoteEvents(state: PersistedComputerAccess): Promise<Array<{ deviceId: string; frames: RemoteEventFrame[] }>> {
+    const devices = state.remoteDevices.filter((device) => !device.revoked);
+    const results = await Promise.allSettled(devices.map(async (device) => {
+      const client = this.remoteHostClient(state, device.id);
+      const capabilities = await client.connect();
+      if (capabilities.hostId !== device.id) throw new Error("Paired device identity does not match the remote agent host");
+      const frames = await client.events(device.eventCursor);
+      device.lastSeenAt = Date.now();
+      return { deviceId: device.id, frames };
+    }));
+    return results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  }
+
+  async refreshRemoteScreens(state: PersistedComputerAccess): Promise<boolean> {
+    if (state.activeDeviceId === state.localDeviceId) return false;
+    const device = this.remoteDevice(state);
+    const screens = await this.remoteScreenClient(device).snapshot();
+    const changed = JSON.stringify(this.remoteScreens.get(device.id)) !== JSON.stringify(screens);
+    this.remoteScreens.set(device.id, screens);
+    device.lastSeenAt = Date.now();
+    return changed;
+  }
+
+  async takeoverScreen(state: PersistedComputerAccess, leaseId: string, epoch: number) { if (state.activeDeviceId === state.localDeviceId) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.takeover(leaseId, epoch); } const device = this.remoteDevice(state); const result = await this.remoteScreenClient(device).takeover(leaseId, epoch); await this.refreshRemoteScreens(state); return result; }
+  async returnScreen(state: PersistedComputerAccess, leaseId: string, epoch: number) { if (state.activeDeviceId === state.localDeviceId) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.returnControl(leaseId, epoch); } const device = this.remoteDevice(state); const result = await this.remoteScreenClient(device).returnControl(leaseId, epoch); await this.refreshRemoteScreens(state); return result; }
+  async lockScreen(state: PersistedComputerAccess, leaseId: string, epoch: number) { if (state.activeDeviceId === state.localDeviceId) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.lock(leaseId, epoch); } const device = this.remoteDevice(state); const result = await this.remoteScreenClient(device).lock(leaseId, epoch); await this.refreshRemoteScreens(state); return result; }
+
   private remoteDevice(state: PersistedComputerAccess): PersistedRemoteDevice {
     const device = state.remoteDevices.find((item) => item.id === state.activeDeviceId && !item.revoked);
     if (!device) throw new Error("Remote computer is unavailable or revoked");
@@ -358,6 +419,12 @@ export class ComputerAccessService {
       body: JSON.stringify(body),
     }, 125_000);
   }
+
+  private remoteScreenClient(device: PersistedRemoteDevice): ScreenClient {
+    return new ScreenClient(new FetchRemoteScreenTransport(device.endpoint, this.remoteCredential(device)));
+  }
+
+  private remoteCredential(device: PersistedRemoteDevice): string { const token = this.secrets.unseal(device.encryptedToken); if (!token) throw new Error("Remote computer credential is unavailable"); return token; }
 }
 
 export function newAuditId(): string {

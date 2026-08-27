@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import type {
   CapabilitiesSnapshot,
   ConnectorCapability,
@@ -18,6 +19,20 @@ interface ConfigSection {
 interface SkillRoot {
   pathname: string;
   scope: SkillCapability["scope"];
+}
+
+export interface McpServerConfiguration {
+  id: string;
+  enabled: boolean;
+  transport: "stdio" | "streamable-http";
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  bearerTokenEnvVar?: string;
+  timeoutMs: number;
 }
 
 const BENIGN_MISSING_CODES = new Set(["ENOENT", "ENOTDIR", "EACCES"]);
@@ -237,6 +252,53 @@ export class CapabilitiesService {
       connectors: connectorCapabilities(content),
       configPath: this.configPath,
     };
+  }
+
+  async mcpServerConfigurations(): Promise<McpServerConfiguration[]> {
+    const content = await this.readConfig();
+    if (!content.trim()) return [];
+    const parsed = parseToml(content) as Record<string, unknown>;
+    const rawServers = parsed.mcp_servers;
+    if (!rawServers || typeof rawServers !== "object" || Array.isArray(rawServers)) return [];
+    return Object.entries(rawServers as Record<string, unknown>).flatMap(([id, value]): McpServerConfiguration[] => {
+      if (!/^[a-zA-Z0-9_@./-]{1,240}$/.test(id) || new Set(["__proto__", "constructor", "prototype"]).has(id) || !value || typeof value !== "object" || Array.isArray(value)) return [];
+      const server = value as Record<string, unknown>;
+      const enabled = server.enabled !== false;
+      const timeout = typeof server.tool_timeout_sec === "number" ? server.tool_timeout_sec * 1_000 : 30_000;
+      const timeoutMs = Math.max(1_000, Math.min(300_000, Math.round(timeout)));
+      const stringRecord = (input: unknown): Record<string, string> | undefined => {
+        if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+        const entries = Object.entries(input as Record<string, unknown>)
+          .filter(([key, item]) => /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) && typeof item === "string" && item.length <= 16_000)
+          .slice(0, 100) as Array<[string, string]>;
+        return entries.length ? Object.fromEntries(entries) : undefined;
+      };
+      const headerRecord = (input: unknown): Record<string, string> | undefined => {
+        if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+        const entries = Object.entries(input as Record<string, unknown>)
+          .filter(([key, item]) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(key) && typeof item === "string" && item.length <= 16_000)
+          .slice(0, 100) as Array<[string, string]>;
+        return entries.length ? Object.fromEntries(entries) : undefined;
+      };
+      if (typeof server.url === "string" && server.url.length <= 4_000) {
+        return [{
+          id, enabled, transport: "streamable-http", url: server.url,
+          headers: headerRecord(server.http_headers),
+          bearerTokenEnvVar: typeof server.bearer_token_env_var === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(server.bearer_token_env_var) ? server.bearer_token_env_var : undefined,
+          timeoutMs,
+        }];
+      }
+      if (typeof server.command === "string" && server.command.length <= 2_000) {
+        return [{
+          id, enabled, transport: "stdio", command: server.command,
+          args: Array.isArray(server.args) ? server.args.filter((item): item is string => typeof item === "string" && item.length <= 8_000).slice(0, 100) : [],
+          cwd: typeof server.cwd === "string" && server.cwd.length <= 4_000 ? server.cwd : undefined,
+          env: stringRecord(server.env),
+          timeoutMs,
+        }];
+      }
+      return [];
+    });
   }
 
   async setSkillEnabled(pathname: string, enabled: boolean, workingDirectory: string): Promise<CapabilitiesSnapshot> {

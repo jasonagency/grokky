@@ -58,19 +58,40 @@ import type {
   RunOutcome,
   SandboxMode,
   SkillCapability,
+  McpToolClassification,
+  UpdateChannel,
 } from "../../shared/contracts";
+import type { EvalComparisonResult, EvalStateSnapshot, ReplayMode, ReplayResult, TraceBundle, TraceQuery, ProjectionChange } from "../../shared/control-plane-contracts";
 import { CODEX_MODELS } from "../../shared/contracts";
 import { requiresDevelopmentCommands, requiresProjectDirectory } from "../../shared/run-preflight";
 import { botVariantAt, botVariantForIdentity, type BotVariant } from "./bot-identity";
 import { ModelCombobox, SelectMenu, type SelectChoice } from "./Controls";
 import { activitiesForDisplay, type DisplayActivity } from "./activity-display";
 import { crewRunsForDisplay, crewRunStage, groupCrewCommunications } from "./crew-display";
+import { TaskControlRoom } from "./features/tasks/TaskControlRoom";
+import { McpToolPolicy } from "./features/team/McpToolPolicy";
+import { AgentWorkspace } from "./features/team/AgentWorkspace";
+import { TraceExplorer } from "./features/traces/TraceExplorer";
+import { ReplayDialog } from "./features/traces/ReplayDialog";
+import { EvalDashboard } from "./features/evaluations/EvalDashboard";
+import { EvalComparison } from "./features/evaluations/EvalComparison";
+import { AgentComputerView } from "./features/computer/AgentComputerView";
+import { UpdateBanner } from "./features/updates/UpdateBanner";
+import type { ScreenLease } from "../../shared/remote-protocol";
 
 const OPENROUTER_SUGGESTIONS = [
   "openai/gpt-5.2",
   "anthropic/claude-sonnet-4.6",
   "google/gemini-3.1-pro-preview",
   "minimax/minimax-m2",
+];
+
+const PI_MODEL_SUGGESTIONS = [
+  "auto",
+  "anthropic/claude-sonnet-4-6",
+  "openai/gpt-5.2",
+  "openrouter/openai/gpt-5.2",
+  "openrouter/anthropic/claude-sonnet-4.6",
 ];
 
 const CODEX_MODEL_CHOICES: Array<SelectChoice<string>> = CODEX_MODELS.map((model) => ({ value: model, label: model }));
@@ -114,6 +135,10 @@ const THEME_CHOICES: Array<SelectChoice<AppSnapshot["settings"]["theme"]>> = [
   { value: "dark", label: "Dark", detail: "Grokky's cinematic workspace" },
   { value: "light", label: "Light", detail: "Bright, high-contrast workspace" },
 ];
+const UPDATE_CHANNEL_CHOICES: Array<SelectChoice<UpdateChannel>> = [
+  { value: "stable", label: "Stable", detail: "Signed production releases" },
+  { value: "beta", label: "Beta", detail: "Signed prereleases for early testing" },
+];
 const SIGNAL_PALETTES: Array<{ id: AccentPalette; label: string; detail: string }> = [
   { id: "lime", label: "Acid lime", detail: "Original Grokky signal" },
   { id: "electric-blue", label: "Electric blue", detail: "Blue current on black" },
@@ -124,7 +149,7 @@ const SIGNAL_PALETTES: Array<{ id: AccentPalette; label: string; detail: string 
 
 type BotMood = "idle" | "thinking" | "working" | "success" | "error";
 type BotSize = "micro" | "xs" | "sm" | "md" | "lg" | "hero";
-type SettingsTab = "session" | "computer" | "skills" | "agents" | "mcp" | "connectors";
+type SettingsTab = "session" | "computer" | "tasks" | "quality" | "skills" | "agents" | "mcp" | "connectors";
 
 const BOT_ASSETS: Record<BotVariant, string> = {
   lime: "./mascots/grokky-hero.png",
@@ -290,7 +315,7 @@ function compactPath(pathname: string): string {
 }
 
 function providerName(provider: ProviderId): string {
-  return provider === "codex" ? "Codex" : "OpenRouter";
+  return provider === "codex" ? "Codex" : provider === "pi" ? "Pi" : "OpenRouter";
 }
 
 function InlineLoader({ label = "Working", quiet = false }: { label?: string; quiet?: boolean }) {
@@ -709,8 +734,8 @@ function CrewPicker({ conversation, agents, enabled, maxAgents, onOpenAgents, on
       </button>
       {open && (
         <div className="crew-picker-popover" role="dialog" aria-label="Choose the crew">
-          <header><strong>Choose the crew</strong><small>{conversation.provider === "openrouter" ? "Parallel read-only scouts, then one lead" : "Codex spawns and coordinates these roles"}</small></header>
-          {!enabled && <div className="crew-picker-warning"><WarningCircle size={15} />Multi-agent orchestration is disabled.</div>}
+          <header><strong>Choose the crew</strong><small>{conversation.provider === "openrouter" ? "Parallel read-only scouts, then one lead" : conversation.provider === "pi" ? "Use the task graph to coordinate multiple Pi agents" : "Codex spawns and coordinates these roles"}</small></header>
+          {!enabled && <div className="crew-picker-warning"><WarningCircle size={15} />{conversation.provider === "pi" ? "Pi chat runs are solo; durable tasks can assign multiple Pi agents." : "Multi-agent orchestration is disabled."}</div>}
           <div className="crew-picker-list">
             {available.map((agent) => {
               const checked = conversation.selectedAgentIds.includes(agent.id);
@@ -983,7 +1008,7 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
       <div className="composer-meta">
         <ProjectPicker conversation={conversation} recentDirectories={recentDirectories} attention={preflightTarget === "project"} openRequest={projectOpenRequest} onError={onError} />
         <AccessPicker conversation={conversation} attention={preflightTarget === "access"} openRequest={accessOpenRequest} onError={onError} />
-        <CrewPicker conversation={conversation} agents={agents} enabled={multiAgentEnabled} maxAgents={maxAgents} onOpenAgents={onOpenAgents} onError={onError} />
+        <CrewPicker conversation={conversation} agents={agents} enabled={multiAgentEnabled && conversation.provider !== "pi"} maxAgents={maxAgents} onOpenAgents={onOpenAgents} onError={onError} />
         {preflightTarget && <span className="composer-preflight-note"><WarningCircle size={12} />{preflightTarget === "project" ? "Choose a project to continue" : "Choose Full access to continue"}</span>}
         <span className={`web-access-status ${webSearchEnabled ? "enabled" : ""}`} title={webSearchEnabled ? "Live web search is enabled" : "Live web search is disabled"}><GlobeHemisphereWest size={12} />Web {webSearchEnabled ? "on" : "off"}</span>
         <span>Enter to send</span>
@@ -1044,6 +1069,7 @@ function scopeLabel(skill: SkillCapability): string {
 }
 
 function ComputerCapabilityIcon({ id }: { id: ComputerCapabilityId }) {
+  if (id === "mcp") return <PlugsConnected size={17} />;
   if (id === "screen") return <Eye size={17} />;
   if (id === "automation") return <CursorClick size={17} />;
   if (id === "browser") return <GlobeHemisphereWest size={17} />;
@@ -1058,11 +1084,72 @@ function permissionLabel(value: string): string {
   return value === "granted" ? "System permission granted" : "System permission denied";
 }
 
-function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsChange, onClose, onError }: {
+function QualityLab({ onError }: { onError(error: string): void }) {
+  const [query, setQuery] = useState<TraceQuery>({});
+  const [trace, setTrace] = useState<TraceBundle>();
+  const [evaluations, setEvaluations] = useState<EvalStateSnapshot>();
+  const [comparison, setComparison] = useState<EvalComparisonResult>();
+  const [replayMode, setReplayMode] = useState<ReplayMode>("inspection");
+  const [replay, setReplay] = useState<ReplayResult>();
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void Promise.all([window.grokky.queryTrace({}), window.grokky.getEvaluations()])
+      .then(([nextTrace, nextEvaluations]) => { setTrace(nextTrace); setEvaluations(nextEvaluations); })
+      .catch((error) => onError(error instanceof Error ? error.message : "Quality evidence could not be loaded"));
+  }, [onError]);
+
+  async function refresh() {
+    setBusy(true);
+    try { setTrace(await window.grokky.queryTrace(query)); }
+    catch (error) { onError(error instanceof Error ? error.message : "Trace could not be loaded"); }
+    finally { setBusy(false); }
+  }
+
+  async function runReplay() {
+    if (!trace) return;
+    setBusy(true);
+    try { setReplay(await window.grokky.replayTrace({ mode: replayMode, trace })); }
+    catch (error) { onError(error instanceof Error ? error.message : "Replay failed"); }
+    finally { setBusy(false); }
+  }
+
+  async function promote() {
+    if (!trace?.events.length) return;
+    setBusy(true);
+    try {
+      setEvaluations(await window.grokky.promoteEvaluation({
+        id: `trace-${trace.events[0]!.event.aggregateId}`.slice(0, 160),
+        name: `Trace ${trace.events[0]!.event.aggregateId}`,
+        trace,
+        expectedOutcome: "Repeat the retained deterministic outcome",
+        allowedSideEffects: [],
+        verificationRules: [{ type: "event-present", eventType: trace.events.at(-1)!.event.type }, { type: "no-policy-violations" }],
+      }));
+    } catch (error) { onError(error instanceof Error ? error.message : "Evaluation case could not be created"); }
+    finally { setBusy(false); }
+  }
+
+  async function compare(baselineId: string, candidateId: string) {
+    try { setComparison(await window.grokky.compareEvaluations(baselineId, candidateId)); }
+    catch (error) { onError(error instanceof Error ? error.message : "Evaluation runs could not be compared"); }
+  }
+
+  return <div className="settings-stack quality-lab">
+    <div className="settings-intro"><h3>Trace, replay, and evaluation</h3><p>Inspect exact evidence, replay without accidental side effects, and turn successful runs into regression suites.</p></div>
+    <TraceExplorer trace={trace} query={query} busy={busy} onQuery={setQuery} onRefresh={() => void refresh()} onPromote={() => void promote()} />
+    <ReplayDialog mode={replayMode} busy={busy} result={replay} onMode={setReplayMode} onRun={() => void runReplay()} />
+    <EvalDashboard state={evaluations} onCompare={(baselineId, candidateId) => void compare(baselineId, candidateId)} />
+    <EvalComparison comparison={comparison} />
+  </div>;
+}
+
+function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRequest, onAgentsChange, onClose, onError }: {
   snapshot: AppSnapshot;
   conversation: Conversation;
   agents: AgentDefinition[];
   initialTab: SettingsTab;
+  openTaskRequest?: { taskId: string; nonce: string };
   onAgentsChange(agents: AgentDefinition[]): void;
   onClose(): void;
   onError(error: string): void;
@@ -1084,6 +1171,15 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     setTab(initialTab);
     void window.grokky.getCapabilities().then(setCapabilities).catch((error) => onError(error instanceof Error ? error.message : "Capabilities could not be loaded"));
   }, [initialTab, onError]);
+
+  useEffect(() => {
+    if (tab !== "mcp") return;
+    setBusy("mcp-refresh");
+    void window.grokky.refreshMcpCapabilities()
+      .then(setCapabilities)
+      .catch((error) => onError(error instanceof Error ? error.message : "MCP tools could not be discovered"))
+      .finally(() => setBusy(""));
+  }, [tab, onError]);
 
   useEffect(() => {
     setNetworkDomains(snapshot.computerAccess.networkAllowlist.join("\n"));
@@ -1122,6 +1218,18 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     }
   }
 
+  async function mcpAuthorization(key: string, action: () => Promise<void | CapabilitiesSnapshot>) {
+    setBusy(key);
+    try {
+      const result = await action();
+      if (result) setCapabilities(result);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "MCP authorization could not be updated");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function computerAction(key: string, action: () => Promise<void>) {
     setComputerBusy(key);
     try {
@@ -1139,6 +1247,10 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
       setPairOpen(false);
       setPairingCode("");
     });
+  }
+
+  async function screenAction(lease: ScreenLease, action: "takeover" | "return" | "lock") {
+    await computerAction(lease.id, () => action === "takeover" ? window.grokky.takeoverScreen(lease.id, lease.epoch) : action === "return" ? window.grokky.returnScreen(lease.id, lease.epoch) : window.grokky.lockScreen(lease.id, lease.epoch));
   }
 
   function beginAgentDraft(template: AgentDraft, editingId: string | null = null) {
@@ -1179,7 +1291,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   async function removeAgent() {
     if (!editingAgentId) return;
     const current = agents.find((agent) => agent.id === editingAgentId);
-    if (!current || !window.confirm(`Delete ${current.name}? This removes its local agent definition.`)) return;
+    if (!current || !window.confirm(`Delete ${current.name}? This removes its local definition and disables its routines. Shared files and signed-in sessions on agent computers may remain.`)) return;
     setAgentBusy(true);
     try {
       onAgentsChange(await window.grokky.deleteAgent(editingAgentId));
@@ -1192,9 +1304,68 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     }
   }
 
+  async function acknowledgeMessage(messageId: string, agentId: string) {
+    try { await window.grokky.acknowledgeAgentMessage(messageId, agentId); }
+    catch (error) { onError(error instanceof Error ? error.message : "Message could not be acknowledged"); }
+  }
+
+  async function reviewMemory(memoryId: string, decision: "reviewed" | "rejected") {
+    try { await window.grokky.reviewAgentMemory(memoryId, decision); }
+    catch (error) { onError(error instanceof Error ? error.message : "Memory could not be reviewed"); }
+  }
+
+  async function createRoutine(agentId: string, input: { name: string; localTime: string; timeZone: string }) {
+    try {
+      const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "routine";
+      const active = snapshot.conversations.find((conversation) => conversation.id === snapshot.activeConversationId) ?? snapshot.conversations[0];
+      await window.grokky.createAgentRoutine({
+        ownerAgentId: agentId,
+        name: input.name,
+        template: {
+          id: `routine-${slug}`,
+          title: input.name,
+          objective: input.name,
+          nodes: [{
+            id: `task-${slug}`,
+            title: input.name,
+            description: input.name,
+            assignment: {
+              agentId,
+              ...(active?.harnessId ? { harnessId: active.harnessId } : {}),
+              ...(active?.model ? { model: active.model } : {}),
+              ...(active ? {
+                sourceConversationId: active.id,
+                workspace: active.workingDirectory,
+                workspaceMode: active.sandboxMode === "workspace-write" ? "write" as const : "read" as const,
+              } : {}),
+            },
+          }],
+        },
+        schedule: { localTime: input.localTime, timeZone: input.timeZone },
+        targetHostId: snapshot.computerAccess.activeDeviceId,
+        budgetUsd: 1,
+        approvalBoundary: "external-side-effects",
+        active: true,
+      });
+    } catch (error) { onError(error instanceof Error ? error.message : "Routine could not be scheduled"); }
+  }
+
+  async function persistentAgentAction(agentId: string, action: "pin" | "unpin" | "hide" | "archive" | "restore" | "delete") {
+    if (action === "delete" && !window.confirm("Delete this persistent teammate? Active tasks must be reassigned first, and shared files or signed-in sessions may remain.")) return;
+    try { await window.grokky.updatePersistentAgent(agentId, action); }
+    catch (error) { onError(error instanceof Error ? error.message : "Agent lifecycle could not be updated"); }
+  }
+
+  async function duplicatePersistentAgent(agentId: string, name: string) {
+    try { await window.grokky.duplicatePersistentAgent(agentId, name); }
+    catch (error) { onError(error instanceof Error ? error.message : "Agent could not be duplicated"); }
+  }
+
   const navItems: Array<{ id: SettingsTab; label: string; icon: typeof SlidersHorizontal }> = [
     { id: "session", label: "Session", icon: SlidersHorizontal },
     { id: "computer", label: "Computer access", icon: DesktopTower },
+    { id: "tasks", label: "Task graph", icon: ClockCounterClockwise },
+    { id: "quality", label: "Trace lab", icon: FileText },
     { id: "agents", label: "Agents", icon: UsersThree },
     { id: "skills", label: "Skills", icon: PuzzlePiece },
     { id: "mcp", label: "MCP servers", icon: PlugsConnected },
@@ -1202,9 +1373,11 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   ];
   const navGroups: Array<{ label: string; items: typeof navItems }> = [
     { label: "Workspace", items: navItems.slice(0, 2) },
-    { label: "Orchestration", items: navItems.slice(2, 4) },
-    { label: "Extensions", items: navItems.slice(4, 6) },
+    { label: "Orchestration", items: navItems.slice(2, 6) },
+    { label: "Extensions", items: navItems.slice(6) },
   ];
+  const activeHarness = snapshot.harnesses.find((harness) => harness.id === conversation.harnessId)
+    ?? snapshot.harnesses.find((harness) => harness.providerCompatibility.includes(conversation.provider));
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
@@ -1257,9 +1430,29 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                 </div>
                 <SignalPalette value={snapshot.settings.accentPalette ?? "lime"} onChange={(accentPalette) => void patchSettings({ accentPalette })} />
                 <div className="settings-row">
+                  <span className="settings-copy"><strong>Update channel</strong><small>Grokky checks automatically. You choose when to download and restart.</small></span>
+                  <SelectMenu value={snapshot.update?.channel ?? "stable"} choices={UPDATE_CHANNEL_CHOICES} label="Update channel" disabled={!snapshot.update} onChange={(channel) => void window.grokky.setUpdateChannel(channel).catch((error) => onError(error.message))} />
+                  <button type="button" disabled={!snapshot.update} onClick={() => void window.grokky.checkForUpdate().catch((error) => onError(error.message))}>Check now</button>
+                </div>
+                <div className="settings-row">
                   <span className="settings-copy"><strong>Workspace permission</strong><small>Control whether Grokky can edit files.</small></span>
                   <SelectMenu value={conversation.sandboxMode} choices={SANDBOX_CHOICES} label="Workspace permission" disabled={conversation.status === "running"} onChange={(sandboxMode) => void patchConversation({ sandboxMode })} />
                 </div>
+                {activeHarness && (
+                  <div className="settings-row">
+                    <span className="settings-copy">
+                      <strong>{activeHarness.displayName} <small>v{activeHarness.version}</small></strong>
+                      <small>{[
+                        activeHarness.capabilities.streaming && "streaming",
+                        activeHarness.capabilities.cancellation && "cancel",
+                        activeHarness.capabilities.multiAgent && "multi-agent",
+                        activeHarness.capabilities.mcp && "MCP",
+                        activeHarness.capabilities.computerControl && "computer control",
+                      ].filter(Boolean).join(" · ")}</small>
+                    </span>
+                    <em className={`device-status ${activeHarness.health.ready ? "online" : "offline"}`}>{activeHarness.health.ready ? "ready" : "unavailable"}</em>
+                  </div>
+                )}
                 <div className={`settings-row ${conversation.sandboxMode === "read-only" ? "disabled" : ""}`}>
                   <span className="settings-copy"><strong>Development commands</strong><small>Allow build and test commands for OpenRouter sessions.</small></span>
                   <Switch checked={conversation.allowCommands} disabled={conversation.sandboxMode === "read-only" || conversation.status === "running"} label="Development commands" onChange={(checked) => void patchConversation({ allowCommands: checked })} />
@@ -1351,6 +1544,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                   <textarea value={networkDomains} onChange={(event) => setNetworkDomains(event.target.value)} placeholder={'github.com\ndevelopers.openai.com'} />
                 </section>
 
+                {snapshot.computerAccess.screens && <AgentComputerView screens={snapshot.computerAccess.screens} busy={computerBusy} onAction={(lease, action) => void screenAction(lease, action)} />}
+
                 <section className="computer-section audit-section">
                   <div className="computer-section-heading"><div><h4>Recent computer activity</h4><p>Every allowed and denied action is recorded locally.</p></div><ClockCounterClockwise size={17} /></div>
                   <div className="computer-audit-list">
@@ -1366,6 +1561,10 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                 </section>
               </div>
             )}
+
+            {tab === "quality" && <QualityLab onError={onError} />}
+
+            {tab === "tasks" && <TaskControlRoom snapshot={snapshot} openTaskRequest={openTaskRequest} onError={onError} />}
 
             {tab === "skills" && (
               <div className="settings-stack capability-stack">
@@ -1442,6 +1641,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                     <span className="settings-copy"><strong>Agent updates in chat</strong><small>Let Codex announce delegation and handoffs as they happen.</small></span>
                     <Switch checked={snapshot.settings.interruptAgentMessage} disabled={!snapshot.settings.multiAgentEnabled} label="Agent updates in chat" onChange={(checked) => void patchSettings({ interruptAgentMessage: checked })} />
                   </div>
+                  {snapshot.team && <AgentWorkspace team={snapshot.team} onAcknowledge={(messageId, agentId) => void acknowledgeMessage(messageId, agentId)} onReviewMemory={(memoryId, decision) => void reviewMemory(memoryId, decision)} onCreateRoutine={(agentId, input) => void createRoutine(agentId, input)} onAgentAction={(agentId, action) => void persistentAgentAction(agentId, action)} onDuplicate={(agentId, name) => void duplicatePersistentAgent(agentId, name)} />}
                   <section className="agent-template-section">
                     <div className="agent-roster-header"><span><strong>Quick start</strong><small>Make one yours, then tune it.</small></span></div>
                     <div className="agent-template-strip">{AGENT_TEMPLATES.map((template) => <button key={template.label} type="button" onClick={() => beginAgentDraft(template)}><BotMascot mood="idle" identity={template.name} variant={template.icon} size="xs" /><span><strong>{template.label}</strong><small>{template.description}</small></span><Plus size={14} /></button>)}</div>
@@ -1464,7 +1664,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
 
             {tab === "mcp" && (
               <div className="settings-stack capability-stack">
-                <div className="settings-intro"><h3>Configured MCP servers</h3><p>Grokky inherits the same local Codex MCP configuration.</p></div>
+                <div className="settings-intro"><h3>Configured MCP servers</h3><p>Grokky inherits the same local Codex MCP configuration. Opening this view connects enabled servers in the main process to discover their current tool catalogs.</p></div>
                 {!capabilities ? <div className="capability-loading"><InlineLoader label="Loading servers" /><span>Loading servers</span></div> : (
                   <div className="capability-list">
                     {capabilities.mcpServers.map((server) => (
@@ -1472,12 +1672,20 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                         <span className="settings-row-icon"><PlugsConnected size={18} /></span>
                         <span className="settings-copy"><strong>{server.name}<em>{server.transport}</em></strong><small>{server.id}</small></span>
                         <Switch checked={server.enabled} disabled={busy === server.id} label={`${server.name} MCP server`} onChange={(enabled) => void toggleCapability(server.id, () => window.grokky.setMcpEnabled(server.id, enabled))} />
+                        {server.enabled && <McpToolPolicy
+                          server={server}
+                          busy={busy === server.id || busy.startsWith(`${server.id}:`)}
+                          onClassify={(name, classification: McpToolClassification) => toggleCapability(`${server.id}:${name}`, () => window.grokky.setMcpToolClassification(name, classification))}
+                          onBeginAuthorization={() => mcpAuthorization(`${server.id}:auth`, async () => { await window.grokky.beginMcpAuthorization(server.id); })}
+                          onCompleteAuthorization={(callback) => mcpAuthorization(`${server.id}:auth`, () => window.grokky.completeMcpAuthorization(server.id, callback))}
+                          onRevokeAuthorization={() => mcpAuthorization(`${server.id}:auth`, () => window.grokky.revokeMcpAuthorization(server.id))}
+                        />}
                       </div>
                     ))}
                     {!capabilities.mcpServers.length && <div className="capability-empty">No MCP servers are configured.</div>}
                   </div>
                 )}
-                <p className="settings-note">Local and remote MCP tools are available to Codex when their own approval policy allows them.</p>
+                <p className="settings-note">OpenRouter receives only namespaced tools allowed by Grokky policy. Unannotated tools default to external side effect; read-only specialists receive read-classified tools only.</p>
               </div>
             )}
 
@@ -1582,6 +1790,7 @@ export function App() {
   const [search, setSearch] = useState("");
   const [uiError, setUiError] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
+  const [taskOpenRequest, setTaskOpenRequest] = useState<{ taskId: string; nonce: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState(false);
@@ -1589,6 +1798,21 @@ export function App() {
   useEffect(() => {
     void window.grokky.getSnapshot().then(setSnapshot).catch((error) => setUiError(error.message));
     window.grokky.onSnapshot(setSnapshot);
+    window.grokky.onProjection((change: ProjectionChange) => {
+      if (change.kind !== "conversation") return;
+      setSnapshot((current) => {
+        if (!current) return current;
+        const index = current.conversations.findIndex((conversation) => conversation.id === change.conversation.id);
+        const conversations = [...current.conversations];
+        if (index >= 0) conversations[index] = change.conversation;
+        else conversations.unshift(change.conversation);
+        return { ...current, conversations };
+      });
+    });
+    window.grokky.onOpenTask((taskId) => {
+      setTaskOpenRequest({ taskId, nonce: crypto.randomUUID() });
+      setSettingsTab("tasks");
+    });
   }, []);
 
   useEffect(() => {
@@ -1699,6 +1923,7 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
+          <button type="button" data-settings-tab="tasks" onClick={() => setSettingsTab("tasks")}><ClockCounterClockwise size={17} />Tasks</button>
           <button type="button" data-settings-tab="agents" onClick={() => setSettingsTab("agents")}><UsersThree size={17} />Crew</button>
           <button type="button" data-settings-tab="computer" onClick={() => setSettingsTab("computer")}><DesktopTower size={17} />Computer</button>
           <button type="button" data-settings-tab="skills" onClick={() => setSettingsTab("skills")}><PuzzlePiece size={17} />Skills & tools</button>
@@ -1718,12 +1943,15 @@ export function App() {
               <div className="provider-switch" aria-label="Provider">
                 <button type="button" aria-pressed={active.provider === "codex"} className={active.provider === "codex" ? "active" : ""} onClick={() => void updateProvider("codex")}><span aria-hidden="true" />Codex</button>
                 <button type="button" aria-pressed={active.provider === "openrouter"} className={active.provider === "openrouter" ? "active" : ""} onClick={() => void updateProvider("openrouter")}><span aria-hidden="true" />OpenRouter</button>
+                <button type="button" aria-pressed={active.provider === "pi"} className={active.provider === "pi" ? "active" : ""} onClick={() => void updateProvider("pi")}><span aria-hidden="true" />Pi</button>
               </div>
               <i className="toolbar-separator" aria-hidden="true" />
               <div className="toolbar-field model-field">
                 <Robot size={15} weight="duotone" />
                 {active.provider === "codex" ? (
                   <SelectMenu value={active.model} choices={CODEX_MODEL_CHOICES} label="Codex model" compact disabled={active.status === "running"} onChange={(model) => void window.grokky.updateConversation(active.id, { model }).catch((error) => setUiError(error.message))} />
+                ) : active.provider === "pi" ? (
+                  <ModelCombobox value={active.model} suggestions={PI_MODEL_SUGGESTIONS} label="Pi model" disabled={active.status === "running"} onCommit={(model) => void window.grokky.updateConversation(active.id, { model }).catch((error) => setUiError(error.message))} />
                 ) : (
                   <ModelCombobox value={active.model} suggestions={OPENROUTER_SUGGESTIONS} label="OpenRouter model" disabled={active.status === "running"} onCommit={(model) => void window.grokky.updateConversation(active.id, { model }).catch((error) => setUiError(error.message))} />
                 )}
@@ -1743,11 +1971,22 @@ export function App() {
           </div>
         </header>
 
+        <div className="update-banner-slot">
+          <UpdateBanner
+            update={snapshot.update}
+            onDownload={() => window.grokky.downloadUpdate()}
+            onInstall={() => window.grokky.installUpdate()}
+            onCheck={() => window.grokky.checkForUpdate()}
+            onOpenDetails={(url) => window.grokky.openExternal(url)}
+            onError={setUiError}
+          />
+        </div>
+
         <MessageList conversation={active} agents={agents} />
         <Composer conversation={active} agents={agents} recentDirectories={snapshot.settings.recentWorkingDirectories} multiAgentEnabled={snapshot.settings.multiAgentEnabled} maxAgents={snapshot.settings.maxAgentThreads} webSearchEnabled={snapshot.settings.webSearchEnabled} onOpenAgents={() => setSettingsTab("agents")} onError={setUiError} />
       </main>
 
-      {settingsTab && <SettingsDialog snapshot={snapshot} conversation={active} agents={agents} initialTab={settingsTab} onAgentsChange={setAgents} onClose={() => setSettingsTab(null)} onError={setUiError} />}
+      {settingsTab && <SettingsDialog snapshot={snapshot} conversation={active} agents={agents} initialTab={settingsTab} openTaskRequest={taskOpenRequest ?? undefined} onAgentsChange={setAgents} onClose={() => setSettingsTab(null)} onError={setUiError} />}
 
       {pendingDelete && <DeleteConversationDialog title={pendingDelete.title} busy={deleteBusy} onCancel={() => { if (!deleteBusy) setPendingDelete(null); }} onConfirm={() => void confirmDelete()} />}
 

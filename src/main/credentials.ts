@@ -61,29 +61,53 @@ export async function resolveOpenRouterCredential(
 }
 
 export async function providerStatuses(settings: AppSettings, homeDirectory: string): Promise<ProviderStatus[]> {
+  return Promise.all([codexCredentialStatus(homeDirectory), openRouterCredentialStatus(settings, homeDirectory), piCredentialStatus(homeDirectory)]);
+}
+
+export async function piCredentialStatus(homeDirectory: string): Promise<ProviderStatus> {
+  const authPath = process.env.PI_CODING_AGENT_DIR
+    ? join(process.env.PI_CODING_AGENT_DIR, "auth.json")
+    : join(homeDirectory, ".pi", "agent", "auth.json");
+  const stored = await access(authPath, constants.R_OK).then(() => true).catch(() => false);
+  const inherited = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    .some((key) => Boolean(process.env[key]?.trim()));
+  const ready = stored || inherited;
+  return {
+    id: "pi",
+    ready,
+    label: ready ? "Pi credentials available" : "Pi credentials missing",
+    source: stored ? "Saved Pi credential store" : inherited ? "Process environment" : authPath,
+    detail: ready
+      ? "Credentials stay in the Electron main process and Pi model runtime."
+      : "Add a provider credential with Pi or set a supported provider API key, then refresh status.",
+  };
+}
+
+export async function codexCredentialStatus(homeDirectory: string): Promise<ProviderStatus> {
   const codexAuthPath = process.env.CODEX_HOME
     ? join(process.env.CODEX_HOME, "auth.json")
     : join(homeDirectory, ".codex", "auth.json");
   const codexReady = await access(codexAuthPath, constants.R_OK).then(() => true).catch(() => false);
+  return {
+    id: "codex",
+    ready: codexReady,
+    label: codexReady ? "Codex signed in" : "Codex sign-in missing",
+    source: codexReady ? "Saved ChatGPT session" : codexAuthPath,
+    detail: codexReady
+      ? "The official SDK will use the existing Codex authentication."
+      : "Run codex login once, then refresh provider status.",
+  };
+}
+
+export async function openRouterCredentialStatus(settings: AppSettings, homeDirectory: string): Promise<ProviderStatus> {
   const openRouter = await resolveOpenRouterCredential(settings, homeDirectory);
-  return [
-    {
-      id: "codex",
-      ready: codexReady,
-      label: codexReady ? "Codex signed in" : "Codex sign-in missing",
-      source: codexReady ? "Saved ChatGPT session" : codexAuthPath,
-      detail: codexReady
-        ? "The official SDK will use the existing Codex authentication."
-        : "Run codex login once, then refresh provider status.",
-    },
-    {
-      id: "openrouter",
-      ready: Boolean(openRouter),
-      label: openRouter ? "OpenRouter configured" : "OpenRouter key missing",
-      source: openRouter?.source ?? "No credential source found",
-      detail: openRouter
-        ? "The key stays in the Electron main process."
-        : "Choose an env file containing OPENROUTER_API_KEY.",
-    },
-  ];
+  return {
+    id: "openrouter",
+    ready: Boolean(openRouter),
+    label: openRouter ? "OpenRouter configured" : "OpenRouter key missing",
+    source: openRouter?.source ?? "No credential source found",
+    detail: openRouter
+      ? "The key stays in the Electron main process."
+      : "Choose an env file containing OPENROUTER_API_KEY.",
+  };
 }

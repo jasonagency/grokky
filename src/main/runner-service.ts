@@ -6,6 +6,19 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ComputerCapabilityId, SandboxMode } from "../shared/contracts";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
+import { REMOTE_PROTOCOL } from "../shared/remote-protocol";
+import type { RemoteControlCommand, RemoteJobRequest, RemoteRoutineRegistration } from "../shared/remote-protocol";
+import type { ScreenInput, ScreenKind } from "../shared/remote-protocol";
+import type { AgentHost } from "../runner/agent-host";
+import { AgentHost as DefaultAgentHost } from "../runner/agent-host";
+import { HostStore } from "../runner/host-store";
+import { createHostHarnessRegistry } from "../runner/host-harness-adapters";
+import { ScreenSessionManager, type ScreenProvider } from "../runner/screen-session-manager";
+import { BrowserSessionBroker } from "../runner/browser-session-broker";
+import { BrowserScreenProvider } from "../runner/browser-screen-provider";
+import { DesktopScreenProvider } from "../runner/desktop-screen-provider";
+import { CdpBrowserBackend } from "../runner/cdp-browser-backend";
+import { ProvisionedDesktopBackend } from "../runner/provisioned-desktop-backend";
 
 interface RunnerDiskState {
   deviceId: string;
@@ -19,7 +32,11 @@ interface RunnerOptions {
   statePath: string;
   allowWrite: boolean;
   allowCommands: boolean;
+  pairingCodeTtlMs: number;
+  pairingAttemptLimit: number;
+  now(): number;
   onReady?(details: { endpoint: string; code: string; deviceId: string }): void;
+  agentHostFactory?(credential: string, deviceId: string): AgentHost | Promise<AgentHost>;
 }
 
 interface RunnerHandle {
@@ -91,7 +108,16 @@ function bearer(request: IncomingMessage): string {
 export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<RunnerOptions, "root" | "statePath">): Promise<RunnerHandle> {
   const root = resolve(options.root);
   const state = await loadRunnerState(options.statePath);
+  const agentHost = options.agentHostFactory ? await options.agentHostFactory(state.token, state.deviceId) : undefined;
+  await agentHost?.initialize();
+  const now = options.now ?? Date.now;
+  const pairingCodeTtlMs = options.pairingCodeTtlMs ?? 10 * 60_000;
+  const pairingAttemptLimit = options.pairingAttemptLimit ?? 10;
+  if (!Number.isFinite(pairingCodeTtlMs) || pairingCodeTtlMs < 30_000) throw new Error("Pairing code lifetime must be at least 30 seconds");
+  if (!Number.isInteger(pairingAttemptLimit) || pairingAttemptLimit < 1 || pairingAttemptLimit > 100) throw new Error("Pairing attempt limit must be between 1 and 100");
   let code = pairingCode();
+  let codeExpiresAt = now() + pairingCodeTtlMs;
+  let pairingAttempts = 0;
   const capabilities: ComputerCapabilityId[] = ["files", ...(options.allowCommands ? ["commands" as const] : [])];
   const server = createServer(async (request, response) => {
     try {
@@ -99,6 +125,8 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
       if (request.method === "GET" && url.pathname === "/health") {
         send(response, 200, {
           ok: true,
+          protocol: REMOTE_PROTOCOL,
+          hostCapabilities: { filesCompatibility: true, agentJobs: Boolean(agentHost), ...(agentHost ? { agent: agentHost.capabilities() } : {}) },
           device: { id: state.deviceId, name: hostname() || "Grokky Runner", platform: platform(), root, capabilities },
         });
         return;
@@ -109,13 +137,22 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
       }
       const body = await readJson(request);
       if (url.pathname === "/pair") {
+        if (now() >= codeExpiresAt || pairingAttempts >= pairingAttemptLimit) {
+          send(response, 429, { error: "Pairing code expired or exceeded its attempt limit; restart the runner to issue a new code" });
+          return;
+        }
         if (typeof body.code !== "string" || !tokenEqual(body.code, code)) {
+          pairingAttempts += 1;
           send(response, 403, { error: "Pairing code is invalid or expired" });
           return;
         }
         code = pairingCode();
+        codeExpiresAt = now() + pairingCodeTtlMs;
+        pairingAttempts = 0;
         send(response, 200, {
           token: state.token,
+          protocol: REMOTE_PROTOCOL,
+          hostCapabilities: { filesCompatibility: true, agentJobs: Boolean(agentHost), ...(agentHost ? { agent: agentHost.capabilities() } : {}) },
           device: { id: state.deviceId, name: hostname() || "Grokky Runner", platform: platform(), root, capabilities },
         });
         return;
@@ -139,6 +176,26 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
         send(response, 400, { error: "Capability is unavailable on this runner" });
         return;
       }
+      if (url.pathname === "/host/jobs" && agentHost) {
+        send(response, 200, { job: await agentHost.submit(state.token, body.job as RemoteJobRequest) });
+        return;
+      }
+      if (url.pathname === "/host/events" && agentHost) {
+        send(response, 200, { events: agentHost.events(state.token, Number(body.afterCursor), body.limit === undefined ? undefined : Number(body.limit)) });
+        return;
+      }
+      if (url.pathname === "/host/control" && agentHost) {
+        send(response, 200, await agentHost.control(state.token, body.command as RemoteControlCommand));
+        return;
+      }
+      if (url.pathname === "/host/routines" && agentHost) { send(response, 200, { routine: await agentHost.upsertRoutine(state.token, body.routine as RemoteRoutineRegistration) }); return; }
+      if (url.pathname === "/host/screens" && agentHost) { send(response, 200, { screens: agentHost.screenSnapshot(state.token) }); return; }
+      if (url.pathname === "/host/screens/lease" && agentHost) { send(response, 200, { lease: await agentHost.leaseScreen(state.token, String(body.agentId), body.kind as ScreenKind) }); return; }
+      if (url.pathname === "/host/screens/capture" && agentHost) { send(response, 200, { frame: await agentHost.captureScreen(state.token, String(body.leaseId), Number(body.epoch)) }); return; }
+      if (url.pathname === "/host/screens/input" && agentHost) { await agentHost.agentScreenInput(state.token, String(body.leaseId), Number(body.epoch), String(body.agentId), body.input as ScreenInput); send(response, 200, { ok: true }); return; }
+      if (url.pathname === "/host/screens/operator-input" && agentHost) { await agentHost.operatorScreenInput(state.token, String(body.leaseId), Number(body.epoch), body.input as ScreenInput); send(response, 200, { ok: true }); return; }
+      if (url.pathname === "/host/screens/control" && agentHost) { const leaseId = String(body.leaseId); const epoch = Number(body.epoch); const action = String(body.action); if (!new Set(["takeover", "return", "lock"]).has(action)) { send(response, 400, { error: "Screen control action is invalid" }); return; } const lease = action === "takeover" ? agentHost.takeoverScreen(state.token, leaseId, epoch) : action === "return" ? agentHost.returnScreen(state.token, leaseId, epoch) : agentHost.lockScreen(state.token, leaseId, epoch); send(response, 200, { lease }); return; }
+      if (url.pathname === "/host/screens/revoke" && agentHost) { await agentHost.revokeScreen(state.token, String(body.leaseId), Number(body.epoch)); send(response, 200, { ok: true }); return; }
       if (url.pathname === "/execute") {
         if (typeof body.name !== "string" || !toolNames.has(body.name as WorkspaceToolName)) {
           send(response, 400, { error: "Runner tool is unsupported" });
@@ -173,7 +230,7 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
     endpoint,
     code,
     deviceId: state.deviceId,
-    close: () => new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise())),
+    close: async () => { await new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise())); await agentHost?.shutdown(); },
   };
 }
 
@@ -188,13 +245,37 @@ if (invokedPath && invokedPath === resolve(fileURLToPath(import.meta.url))) {
   const host = argument("--host") ?? "127.0.0.1";
   const port = Number(argument("--port") ?? 4747);
   const statePath = argument("--state") ?? resolve(homedir(), ".grokky-runner", "state.json");
+  const agentHostEnabled = process.argv.includes("--agent-host");
+  const allowWrite = process.argv.includes("--allow-write");
+  const allowCommands = process.argv.includes("--allow-commands");
+  const agentStatePath = argument("--agent-state") ?? resolve(homedir(), ".grokky-runner", "agent-host.json");
+  const browserCdp = argument("--browser-cdp");
+  const desktopDisplays = argument("--desktop-displays")?.split(",").map((value) => value.trim()).filter(Boolean);
+  if ((browserCdp || desktopDisplays?.length) && !agentHostEnabled) throw new Error("Screen providers require --agent-host");
+  const screenProviders: ScreenProvider[] = [];
+  if (browserCdp) screenProviders.push(new BrowserScreenProvider(new BrowserSessionBroker(new CdpBrowserBackend(browserCdp)), false));
+  if (desktopDisplays?.length) {
+    if (platform() !== "linux") throw new Error("Provisioned desktop displays are supported only by the Linux agent host");
+    screenProviders.push(new DesktopScreenProvider(new ProvisionedDesktopBackend(desktopDisplays), false));
+  }
+  const screens = screenProviders.length ? new ScreenSessionManager(screenProviders) : undefined;
   await startRunnerServer({
     root,
     host,
     port,
     statePath,
-    allowWrite: process.argv.includes("--allow-write"),
-    allowCommands: process.argv.includes("--allow-commands"),
+    allowWrite,
+    allowCommands,
+    ...(agentHostEnabled ? {
+      agentHostFactory: async (credential, deviceId) => new DefaultAgentHost(
+        deviceId,
+        new HostStore(agentStatePath),
+        await createHostHarnessRegistry({ homeDirectory: homedir(), root: resolve(root), allowWrite, allowCommands, screens }),
+        credential,
+        Date.now,
+        screens,
+      ),
+    } : {}),
     onReady: (details) => {
       process.stdout.write(`Grokky Runner\nEndpoint: ${details.endpoint}\nPairing code: ${details.code}\nDevice: ${details.deviceId}\n`);
     },

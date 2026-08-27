@@ -1,6 +1,9 @@
 import { dialog, ipcMain, shell } from "electron";
 import type { MainController } from "./controller";
 import { IPC } from "../shared/contracts";
+import { validateTaskAction, validateTaskGoalDraft, validateTaskId } from "./control-plane/task-graph";
+import type { ControlPolicyPatch, TaskControlRequest } from "../shared/control-plane-contracts";
+import type { McpToolClassification } from "../shared/contracts";
 import {
   requireComputerAccessLevel,
   requireComputerApprovalDecision,
@@ -48,6 +51,7 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.settingsUpdate, (_event, patch) => controller.updateSettings(validateSettingsPatch(patch)));
   ipcMain.handle(IPC.providersRefresh, () => controller.refreshProviderStatuses());
   ipcMain.handle(IPC.capabilitiesGet, () => controller.getCapabilities());
+  ipcMain.handle(IPC.mcpRefresh, () => controller.refreshMcpCapabilities());
   ipcMain.handle(IPC.skillToggle, (_event, pathname, enabled) => {
     if (typeof pathname !== "string" || pathname.length > 4_000 || typeof enabled !== "boolean") throw new Error("Invalid skill update");
     return controller.setSkillEnabled(pathname, enabled);
@@ -55,6 +59,31 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.mcpToggle, (_event, id, enabled) => {
     if (typeof id !== "string" || id.length > 240 || typeof enabled !== "boolean") throw new Error("Invalid MCP update");
     return controller.setMcpEnabled(id, enabled);
+  });
+  ipcMain.handle(IPC.mcpToolClassify, (_event, name, value) => {
+    if (typeof name !== "string" || typeof value !== "string") throw new Error("Invalid MCP tool policy");
+    return controller.setMcpToolClassification(name, value as McpToolClassification);
+  });
+  ipcMain.handle(IPC.mcpAuthBegin, async (_event, id) => {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_@./-]{1,240}$/.test(id)) throw new Error("Invalid MCP server ID");
+    const serverId = id;
+    const url = await controller.beginMcpAuthorization(serverId);
+    if (url !== "authorized") {
+      const target = new URL(url);
+      const loopback = target.hostname === "localhost" || target.hostname === "127.0.0.1" || target.hostname === "::1";
+      if (target.protocol !== "https:" && !(target.protocol === "http:" && loopback)) throw new Error("MCP authorization URL must use HTTPS or loopback HTTP");
+      await shell.openExternal(target.toString());
+    }
+    return url;
+  });
+  ipcMain.handle(IPC.mcpAuthComplete, (_event, id, callback) => {
+    if (typeof callback !== "string" || !callback.trim() || callback.length > 8_000) throw new Error("Invalid MCP authorization callback");
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_@./-]{1,240}$/.test(id)) throw new Error("Invalid MCP server ID");
+    return controller.completeMcpAuthorization(id, callback);
+  });
+  ipcMain.handle(IPC.mcpAuthRevoke, (_event, id) => {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_@./-]{1,240}$/.test(id)) throw new Error("Invalid MCP server ID");
+    return controller.revokeMcpAuthorization(id);
   });
   ipcMain.handle(IPC.connectorToggle, (_event, id, enabled) => {
     if (typeof id !== "string" || id.length > 240 || typeof enabled !== "boolean") throw new Error("Invalid connector update");
@@ -69,6 +98,31 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.agentDelete, (_event, id) => {
     if (typeof id !== "string" || !/^[a-zA-Z0-9:_-]{3,100}$/.test(id)) throw new Error("Invalid agent ID");
     return controller.deleteAgent(id);
+  });
+  ipcMain.handle(IPC.agentMessageSend, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 20_000) throw new Error("Invalid agent message");
+    return controller.sendAgentMessage(structuredClone(value));
+  });
+  ipcMain.handle(IPC.agentMessageAcknowledge, (_event, messageId, agentId) => controller.acknowledgeAgentMessage(requireId(messageId, "message ID"), requireId(agentId, "agent ID")));
+  ipcMain.handle(IPC.agentMemoryPropose, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 40_000) throw new Error("Invalid agent memory");
+    return controller.proposeAgentMemory(structuredClone(value));
+  });
+  ipcMain.handle(IPC.agentMemoryReview, (_event, id, decision) => {
+    if (decision !== "reviewed" && decision !== "rejected") throw new Error("Invalid memory review decision");
+    return controller.reviewAgentMemory(requireId(id, "memory ID"), decision);
+  });
+  ipcMain.handle(IPC.agentRoutineCreate, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 256_000) throw new Error("Invalid agent routine");
+    return controller.createAgentRoutine(structuredClone(value));
+  });
+  ipcMain.handle(IPC.persistentAgentUpdate, (_event, agentId, action) => {
+    if (!new Set(["pin", "unpin", "hide", "archive", "restore", "delete"]).has(String(action))) throw new Error("Invalid persistent agent action");
+    return controller.updatePersistentAgent(requireId(agentId, "agent ID"), action);
+  });
+  ipcMain.handle(IPC.persistentAgentDuplicate, (_event, agentId, name) => {
+    if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{1,63}$/.test(name)) throw new Error("Invalid duplicate agent name");
+    return controller.duplicatePersistentAgent(requireId(agentId, "agent ID"), name);
   });
   ipcMain.handle(IPC.computerEnabled, (_event, enabled) => {
     if (typeof enabled !== "boolean") throw new Error("Invalid computer access setting");
@@ -88,6 +142,61 @@ export function registerIpc(controller: MainController): void {
     requireId(approvalId, "approval ID"),
     requireComputerApprovalDecision(decision),
   ));
+  ipcMain.handle(IPC.computerScreenTakeover, (_event, leaseId, epoch) => controller.takeoverScreen(requireId(leaseId, "screen lease ID"), Number(epoch)));
+  ipcMain.handle(IPC.computerScreenReturn, (_event, leaseId, epoch) => controller.returnScreen(requireId(leaseId, "screen lease ID"), Number(epoch)));
+  ipcMain.handle(IPC.computerScreenLock, (_event, leaseId, epoch) => controller.lockScreen(requireId(leaseId, "screen lease ID"), Number(epoch)));
+  ipcMain.handle(IPC.taskGoalCreate, (_event, draft) => controller.createTaskGoal(validateTaskGoalDraft(draft)));
+  ipcMain.handle(IPC.taskAction, (_event, taskId, action) => controller.actOnTask(
+    validateTaskId(taskId),
+    validateTaskAction(action),
+  ));
+  ipcMain.handle(IPC.taskWorkspaceIntegrate, (_event, leaseId, targetRef) => {
+    if (typeof targetRef !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._/@{}~^:+-]{0,499}$/.test(targetRef)) throw new Error("Invalid integration target");
+    return controller.integrateTaskWorkspace(requireId(leaseId, "workspace lease ID"), targetRef);
+  });
+  ipcMain.handle(IPC.taskControl, (_event, taskId, value) => {
+    if (!value || typeof value !== "object") throw new Error("Invalid task control");
+    const control = value as Partial<TaskControlRequest>;
+    if (!new Set(["redirect", "follow-up", "pause", "resume", "stop", "reprioritize", "message"]).has(String(control.type))) throw new Error("Invalid task control type");
+    if (typeof control.idempotencyKey !== "string" || !/^[a-zA-Z0-9:_-]{1,160}$/.test(control.idempotencyKey)) throw new Error("Invalid task control idempotency key");
+    if (control.message !== undefined && (typeof control.message !== "string" || !control.message.trim() || control.message.length > 2_000)) throw new Error("Invalid task control message");
+    if (control.priority !== undefined && (!Number.isInteger(control.priority) || control.priority < -100 || control.priority > 100)) throw new Error("Invalid task control priority");
+    return controller.controlTask(validateTaskId(taskId), control as TaskControlRequest);
+  });
+  ipcMain.handle(IPC.controlPoliciesUpdate, (_event, value) => {
+    if (!value || typeof value !== "object") throw new Error("Invalid control policy update");
+    const patch = structuredClone(value) as ControlPolicyPatch;
+    if (patch.budgetPolicy && (!Number.isFinite(patch.budgetPolicy.reserveFraction) || patch.budgetPolicy.reserveFraction < 0 || patch.budgetPolicy.reserveFraction > 1)) throw new Error("Invalid budget reserve");
+    return controller.updateControlPolicies(patch);
+  });
+  ipcMain.handle(IPC.traceQuery, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 8_000) throw new Error("Invalid trace query");
+    return controller.queryTrace(structuredClone(value));
+  });
+  ipcMain.handle(IPC.traceReplay, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 2_000_000) throw new Error("Invalid replay request");
+    return controller.replayTrace(structuredClone(value));
+  });
+  ipcMain.handle(IPC.evalGet, () => controller.getEvaluations());
+  ipcMain.handle(IPC.evalPromote, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 2_000_000) throw new Error("Invalid evaluation case");
+    return controller.promoteEvaluation(structuredClone(value));
+  });
+  ipcMain.handle(IPC.evalGrade, (_event, caseId, version, trace, metrics) => {
+    if (typeof caseId !== "string" || caseId.length > 160 || !Number.isInteger(version)) throw new Error("Invalid evaluation run");
+    return controller.gradeEvaluation(caseId, version, structuredClone(trace), structuredClone(metrics));
+  });
+  ipcMain.handle(IPC.evalCompare, (_event, baselineId, candidateId) => {
+    if (typeof baselineId !== "string" || typeof candidateId !== "string") throw new Error("Invalid evaluation comparison");
+    return controller.compareEvaluations(baselineId, candidateId);
+  });
+  ipcMain.handle(IPC.updateCheck, () => controller.checkForUpdate());
+  ipcMain.handle(IPC.updateDownload, () => controller.downloadUpdate());
+  ipcMain.handle(IPC.updateInstall, () => controller.installUpdate());
+  ipcMain.handle(IPC.updateChannel, (_event, value) => {
+    if (value !== "stable" && value !== "beta") throw new Error("Invalid update channel");
+    return controller.setUpdateChannel(value);
+  });
   ipcMain.handle(IPC.externalOpen, async (_event, value) => {
     if (typeof value !== "string") throw new Error("Invalid URL");
     const url = new URL(value);
