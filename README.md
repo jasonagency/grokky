@@ -443,7 +443,7 @@ Read the complete threat model and trust boundaries in [docs/SECURITY.md](docs/S
 
 ## Pair a private computer
 
-The included runner exposes only bounded workspace tools. It has no model credential, renderer, or access to Grokky's conversation database.
+The runner can operate in two modes. Its default compatibility mode exposes only bounded workspace tools and has no model credential. `--agent-host` additionally enables durable Codex, OpenRouter, and Pi jobs using credentials that already exist on that computer. Neither mode receives Grokky's conversation database.
 
 On the computer to control:
 
@@ -454,17 +454,22 @@ npm ci
 npm run runner -- \
   --root "/absolute/path/to/workspace" \
   --host "100.x.x.x" \
-  --port 4747
+  --port 4747 \
+  --agent-host \
+  --allow-write \
+  --allow-commands
 ```
 
 The runner prints a one-time six-digit pairing code. In Grokky, open **Settings → Computer access**, enter the private endpoint and code, then select the device.
 
-Add `--allow-write` only if the runner may accept workspace-write requests. Add `--allow-commands` only if it may accept the small command allowlist. Grokky's own conversation sandbox and capability policy still apply, creating two independent checks.
+The host advertises only harnesses whose local credential and runtime checks pass. Add `--allow-write` only if it may accept workspace-write requests, and add `--allow-commands` only if it may accept the bounded command allowlist. Grokky's task policy still narrows both flags. Host jobs spool by default at `$HOME/.grokky-runner/agent-host.json`; use `--agent-state` to place that private file elsewhere.
 
 > [!WARNING]
 > Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in compatibility runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
 
-The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. Its authenticated network transport is covered by deterministic loopback and fault-injection tests. The ordinary `npm run runner` command still starts the files-and-commands compatibility runner; provisioning real host harness handlers and credentials is an explicit deployment step. Provider and MCP credentials remain on that host; the desktop retains only its revocable encrypted pairing credential.
+The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. Closing Grokky detaches its monitor without canceling host-owned work; reconnecting settles the original durable attempt from signed events even after the desktop lease expires. Provider credentials remain on the host, and the desktop retains only its revocable encrypted pairing credential.
+
+Browser screens use an operator-started Chromium instance whose DevTools listener is bound to loopback. Start Chromium with one persistent `--user-data-dir` and `--remote-debugging-port`, then pass `--browser-cdp http://127.0.0.1:<port>`. The broker shares that approved login profile while leasing a distinct page to each agent. On Linux, `--desktop-displays :21,:22` leases explicitly provisioned non-root X displays and requires `gnome-screenshot` plus `xdotool`; it never creates or runs a desktop as root.
 
 Agent computer sessions add independently addressed browser pages or non-root desktop sessions behind that same host protocol. Every screen and input event is bound to one lease. Browser pages may share logins that the operator approved, and all sessions share one user-scoped trust boundary. The interface deliberately does not describe them as sandboxes or tenant isolation. Human takeover pauses agent input and keeps password, passkey, two-factor, CAPTCHA, and payment-confirmation content out of model traces.
 
@@ -617,7 +622,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 - Packaged targets are Apple Silicon macOS and Windows x64.
 - Native screen and Accessibility automation are macOS-only.
 - Codex skills, MCP servers, and connectors do not automatically become OpenRouter tools.
-- The ordinary remote-runner command supports bounded file and command capabilities. Agent-host jobs and screen sessions have versioned transports and tested reference providers, but require an explicitly provisioned host; they are not enabled by the compatibility-runner CLI.
+- The remote-runner command defaults to bounded file and command compatibility mode. Durable model jobs require `--agent-host`; browser and Linux desktop screens additionally require explicit provider flags and host-local software.
 - OpenRouter web research currently uses a dedicated research model constant before final synthesis.
 - Verify-workflow packages are unsigned development artifacts; only tagged release-workflow packages are distributable.
 

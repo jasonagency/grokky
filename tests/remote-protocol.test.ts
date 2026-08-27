@@ -10,6 +10,7 @@ describe("remote protocol", () => {
     expect(() => assertSecureRemoteEndpoint("http://203.0.113.2:4747")).toThrow("HTTPS");
     expect(() => assertSecureRemoteEndpoint("http://10.attacker.example:4747")).toThrow("HTTPS");
     expect(assertSecureRemoteEndpoint("http://127.0.0.1:4747")).toBe("http://127.0.0.1:4747");
+    expect(assertSecureRemoteEndpoint("http://[::1]:4747")).toBe("http://[::1]:4747");
     expect(assertSecureRemoteEndpoint("http://100.64.0.2:4747")).toBe("http://100.64.0.2:4747");
   });
 

@@ -212,7 +212,7 @@ Operator takeover pauses model input before human action. Passwords, passkeys, t
 
 ## Remote runner and agent host
 
-The compatibility runner is intentionally small. It has no provider credential and exposes only files plus optional commands. The agent-host layer adds durable model execution, so Codex, OpenRouter, Pi, and MCP credentials stay on that host and are never returned by pairing or event reconciliation.
+The compatibility runner is intentionally small. It has no provider credential and exposes only files plus optional commands. `--agent-host` opts into durable model execution and registers only harnesses whose host-local readiness checks pass. Codex, OpenRouter, Pi, and MCP credentials stay on that host and are never returned by pairing or event reconciliation.
 
 Its permission is the intersection of:
 
@@ -226,6 +226,8 @@ Its permission is the intersection of:
 The protocol uses bearer authentication but does not provide TLS. Bind to loopback or an encrypted authenticated private overlay network. Do not bind to a public interface or forward the port from an internet gateway.
 
 Agent-host frames are size-bounded, ordered, and authenticated. Protocol-major mismatches, invalid signatures, stale lease epochs, stale control cursors, and public plaintext endpoints fail closed. Credential revocation blocks new submission and control while leaving local job and recovery metadata intact. A paired host is still within the same user-scoped trust boundary; it is not a tenant or privilege isolation mechanism.
+
+Chrome DevTools is accepted only on credential-free loopback HTTP endpoints; never expose its debugging port to the overlay or public network. The browser process owns one persistent approved-login profile and the broker leases distinct pages. General desktop sessions require an explicit Linux display allowlist, a non-root runner UID, and fixed `gnome-screenshot` and `xdotool` invocations without a shell. Agent input cannot cross a lease, and sensitive human input is never copied into the screen audit.
 
 The unauthenticated health endpoint returns device name, platform, root, and capabilities. This is acceptable on the intended private transport but is another reason not to expose the runner publicly.
 

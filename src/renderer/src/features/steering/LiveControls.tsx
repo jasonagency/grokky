@@ -17,6 +17,7 @@ export function LiveControls({ task, commands, busy, onControl }: {
       <div className="live-control-buttons">
         <button type="button" disabled={busy || task.status === "paused"} onClick={() => void send({ type: "pause" })}>Pause</button>
         <button type="button" disabled={busy || task.status !== "paused"} onClick={() => void send({ type: "resume" })}>Resume</button>
+        {task.assignment.targetHostId && <button type="button" disabled={busy || task.status !== "running"} onClick={() => void send({ type: "approve" })}>Approve host step</button>}
         <button type="button" disabled={busy || new Set(["succeeded", "failed", "canceled"]).has(task.status)} onClick={() => void send({ type: "stop" })}>Stop</button>
       </div>
       <form onSubmit={(event) => { event.preventDefault(); if (message.trim()) { void send({ type: "redirect", message: message.trim() }); setMessage(""); } }}>

@@ -242,6 +242,10 @@ export interface TaskAssignment {
   agentId?: string;
   harnessId?: string;
   model?: string;
+  targetHostId?: string;
+  budgetUsd?: number;
+  approvalPolicy?: "ask" | "allow" | "deny";
+  screenKind?: "browser" | "desktop";
   requiredCapabilities?: string[];
   sourceConversationId?: string;
   workspace?: string;
@@ -419,7 +423,7 @@ export interface WorkspaceStateSnapshot {
   integrations: IntegrationRecord[];
 }
 
-export type ControlCommandType = "redirect" | "follow-up" | "pause" | "resume" | "stop" | "reprioritize" | "message";
+export type ControlCommandType = "redirect" | "follow-up" | "pause" | "resume" | "stop" | "reprioritize" | "message" | "approve";
 export type ControlCommandStatus = "queued" | "delivered" | "acknowledged" | "rejected" | "expired" | "superseded";
 
 export interface ControlCommandInput {

@@ -10,6 +10,15 @@ import { REMOTE_PROTOCOL } from "../shared/remote-protocol";
 import type { RemoteControlCommand, RemoteJobRequest } from "../shared/remote-protocol";
 import type { ScreenInput, ScreenKind } from "../shared/remote-protocol";
 import type { AgentHost } from "../runner/agent-host";
+import { AgentHost as DefaultAgentHost } from "../runner/agent-host";
+import { HostStore } from "../runner/host-store";
+import { createHostHarnessRegistry } from "../runner/host-harness-adapters";
+import { ScreenSessionManager, type ScreenProvider } from "../runner/screen-session-manager";
+import { BrowserSessionBroker } from "../runner/browser-session-broker";
+import { BrowserScreenProvider } from "../runner/browser-screen-provider";
+import { DesktopScreenProvider } from "../runner/desktop-screen-provider";
+import { CdpBrowserBackend } from "../runner/cdp-browser-backend";
+import { ProvisionedDesktopBackend } from "../runner/provisioned-desktop-backend";
 
 interface RunnerDiskState {
   deviceId: string;
@@ -220,7 +229,7 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
     endpoint,
     code,
     deviceId: state.deviceId,
-    close: () => new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise())),
+    close: async () => { await new Promise<void>((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise())); await agentHost?.shutdown(); },
   };
 }
 
@@ -235,13 +244,37 @@ if (invokedPath && invokedPath === resolve(fileURLToPath(import.meta.url))) {
   const host = argument("--host") ?? "127.0.0.1";
   const port = Number(argument("--port") ?? 4747);
   const statePath = argument("--state") ?? resolve(homedir(), ".grokky-runner", "state.json");
+  const agentHostEnabled = process.argv.includes("--agent-host");
+  const allowWrite = process.argv.includes("--allow-write");
+  const allowCommands = process.argv.includes("--allow-commands");
+  const agentStatePath = argument("--agent-state") ?? resolve(homedir(), ".grokky-runner", "agent-host.json");
+  const browserCdp = argument("--browser-cdp");
+  const desktopDisplays = argument("--desktop-displays")?.split(",").map((value) => value.trim()).filter(Boolean);
+  if ((browserCdp || desktopDisplays?.length) && !agentHostEnabled) throw new Error("Screen providers require --agent-host");
+  const screenProviders: ScreenProvider[] = [];
+  if (browserCdp) screenProviders.push(new BrowserScreenProvider(new BrowserSessionBroker(new CdpBrowserBackend(browserCdp)), false));
+  if (desktopDisplays?.length) {
+    if (platform() !== "linux") throw new Error("Provisioned desktop displays are supported only by the Linux agent host");
+    screenProviders.push(new DesktopScreenProvider(new ProvisionedDesktopBackend(desktopDisplays), false));
+  }
+  const screens = screenProviders.length ? new ScreenSessionManager(screenProviders) : undefined;
   await startRunnerServer({
     root,
     host,
     port,
     statePath,
-    allowWrite: process.argv.includes("--allow-write"),
-    allowCommands: process.argv.includes("--allow-commands"),
+    allowWrite,
+    allowCommands,
+    ...(agentHostEnabled ? {
+      agentHostFactory: async (credential, deviceId) => new DefaultAgentHost(
+        deviceId,
+        new HostStore(agentStatePath),
+        await createHostHarnessRegistry({ homeDirectory: homedir(), root: resolve(root), allowWrite, allowCommands, screens }),
+        credential,
+        Date.now,
+        screens,
+      ),
+    } : {}),
     onReady: (details) => {
       process.stdout.write(`Grokky Runner\nEndpoint: ${details.endpoint}\nPairing code: ${details.code}\nDevice: ${details.deviceId}\n`);
     },

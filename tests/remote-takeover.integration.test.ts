@@ -8,6 +8,8 @@ import { startRunnerServer } from "../src/main/runner-service";
 import { AgentHost } from "../src/runner/agent-host";
 import { HostStore } from "../src/runner/host-store";
 import { HostHarnessRegistry } from "../src/runner/host-harness-registry";
+import { ComputerAccessService } from "../src/main/computer-access";
+import { defaultComputerAccess } from "../src/main/state-store";
 
 describe("remote screen takeover", () => {
   test("pauses agent input, accepts secret human input without tracing content, and resumes only on return", async () => {
@@ -30,6 +32,22 @@ describe("remote screen takeover", () => {
     try {
       const response = await fetch(`${runner.endpoint}/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: runner.code }) }); const { token } = await response.json() as { token: string };
       const client = new ScreenClient(new FetchRemoteScreenTransport(runner.endpoint, token)); const lease = await client.lease("agent:remote", "browser"); expect((await client.takeover(lease.id, lease.epoch)).controller).toBe("operator"); expect((await client.returnControl(lease.id, lease.epoch)).controller).toBe("agent");
+    } finally { await runner.close(); }
+  });
+
+  test("projects and controls paired-host screens through computer access", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "grokky-paired-screen-"));
+    const provider: ScreenProvider = { kind: "browser", create: async () => ({ sessionId: "paired-page", delivery: "snapshot" }), capture: async () => ({ mediaType: "image/png", data: "frame" }), input: async () => undefined, close: async () => undefined };
+    const runner = await startRunnerServer({ root: directory, statePath: join(directory, "runner.json"), host: "127.0.0.1", port: 0, agentHostFactory: (credential, deviceId) => new AgentHost(deviceId, new HostStore(join(directory, "host.json")), new HostHarnessRegistry(), credential, Date.now, new ScreenSessionManager([provider])) });
+    const service = new ComputerAccessService(); const state = defaultComputerAccess();
+    try {
+      await service.pair(state, runner.endpoint, runner.code);
+      const client = new ScreenClient(new FetchRemoteScreenTransport(runner.endpoint, Buffer.from(state.remoteDevices[0]!.encryptedToken, "base64").toString("utf8")));
+      const lease = await client.lease("agent:paired", "browser");
+      await service.refreshRemoteScreens(state);
+      expect(service.snapshot(state, directory).screens?.leases[0]).toMatchObject({ id: lease.id, controller: "agent" });
+      await service.takeoverScreen(state, lease.id, lease.epoch);
+      expect(service.snapshot(state, directory).screens?.leases[0]?.controller).toBe("operator");
     } finally { await runner.close(); }
   });
 });

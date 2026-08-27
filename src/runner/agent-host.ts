@@ -19,7 +19,7 @@ export class AgentHost {
   }
 
   async initialize(): Promise<void> { await this.store.initialize(); this.scheduler.recover(); }
-  capabilities(): RemoteHostCapabilities { return { protocol: REMOTE_PROTOCOL, hostId: this.hostId, harnesses: this.registry.ids(), controls: ["cancel", "pause", "resume", "approve"], filesCompatibility: true, maxFrameBytes: MAX_REMOTE_FRAME_BYTES }; }
+  capabilities(): RemoteHostCapabilities { return { protocol: REMOTE_PROTOCOL, hostId: this.hostId, harnesses: this.registry.ids(), harnessReadiness: this.registry.readiness(), controls: ["cancel", "resume", "approve"], filesCompatibility: true, ...(this.screens ? { screens: this.screens.kinds() } : {}), maxFrameBytes: MAX_REMOTE_FRAME_BYTES }; }
 
   async submit(credential: string, request: RemoteJobRequest): Promise<RemoteJobRecord> {
     this.authorize(credential); this.validateRequest(request);
@@ -52,16 +52,17 @@ export class AgentHost {
     if (command.leaseEpoch !== job.leaseEpoch) throw new Error("Remote control command has a stale lease epoch");
     if (command.afterCursor < snapshot.cursor - 10_000) throw new Error("Remote control command cursor is stale");
     if (snapshot.commandIds.includes(command.id)) return { accepted: true, duplicate: true };
+    if (command.type === "pause") return { accepted: false };
     await this.store.mutate((state) => { state.commandIds.push(command.id); state.commandIds = state.commandIds.slice(-2_000); });
     if (command.type === "cancel") await this.scheduler.cancel(job.id);
     else if (command.type === "approve") {
       if (command.decision === "deny") await this.scheduler.cancel(job.id); else await this.scheduler.resume(job.id);
     } else if (command.type === "resume") await this.scheduler.resume(job.id);
-    else await this.append(job, "diagnostic", { control: "pause", status: "accepted" }, credential);
     return { accepted: true };
   }
 
   revoke(): void { this.credentialHash = undefined; }
+  async shutdown(): Promise<void> { this.scheduler.shutdown(); await this.registry.cleanup(); }
   snapshot() { return this.store.snapshot(); }
   screenSnapshot(credential: string) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.snapshot(); }
   leaseScreen(credential: string, agentId: string, kind: ScreenKind) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.lease(agentId, kind); }

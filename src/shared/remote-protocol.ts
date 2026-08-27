@@ -8,6 +8,8 @@ export interface RemoteHostCapabilities {
   protocol: { major: number; minor: number };
   hostId: string;
   harnesses: string[];
+  harnessReadiness?: Array<{ id: string; ready: boolean; label: string; detail: string }>;
+  screens?: ScreenKind[];
   controls: Array<"cancel" | "pause" | "resume" | "approve">;
   filesCompatibility: boolean;
   maxFrameBytes: number;
@@ -142,7 +144,7 @@ export function assertCompatibleProtocol(remote: { major: number; minor: number 
 
 export function assertSecureRemoteEndpoint(endpoint: string): string {
   const url = new URL(endpoint);
-  const loopback = new Set(["localhost", "127.0.0.1", "::1"]).has(url.hostname);
+  const loopback = new Set(["localhost", "127.0.0.1", "[::1]"]).has(url.hostname);
   const privateOverlay = isIP(url.hostname) === 4
     && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])\.)/.test(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && (loopback || privateOverlay))) throw new Error("Remote host requires HTTPS or authenticated private-overlay transport");

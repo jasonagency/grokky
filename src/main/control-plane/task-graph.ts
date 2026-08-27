@@ -48,11 +48,14 @@ function requirePriority(value: unknown): number {
 function requireAssignment(assignment: unknown): TaskNode["assignment"] {
   if (!isRecord(assignment)) throw new Error("Invalid task assignment");
   const next = clone(assignment) as TaskNode["assignment"];
-  for (const value of [next.agentId, next.harnessId, next.model, next.sourceConversationId]) {
+  for (const value of [next.agentId, next.harnessId, next.model, next.sourceConversationId, next.targetHostId]) {
     if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 240)) throw new Error("Invalid task assignment");
   }
   if (next.workspace !== undefined && (typeof next.workspace !== "string" || !next.workspace.trim() || next.workspace.length > 4_000)) throw new Error("Invalid task workspace");
   if (next.workspaceMode !== undefined && next.workspaceMode !== "read" && next.workspaceMode !== "write") throw new Error("Invalid task workspace mode");
+  if (next.budgetUsd !== undefined && (typeof next.budgetUsd !== "number" || !Number.isFinite(next.budgetUsd) || next.budgetUsd < 0 || next.budgetUsd > 100_000)) throw new Error("Invalid task budget");
+  if (next.approvalPolicy !== undefined && !new Set(["ask", "allow", "deny"]).has(next.approvalPolicy)) throw new Error("Invalid remote approval policy");
+  if (next.screenKind !== undefined && next.screenKind !== "browser" && next.screenKind !== "desktop") throw new Error("Invalid remote screen kind");
   if (next.requiredCapabilities && (!Array.isArray(next.requiredCapabilities) || next.requiredCapabilities.length > 50 || next.requiredCapabilities.some((value) => typeof value !== "string" || !TASK_CAPABILITIES.has(value)))) {
     throw new Error("Invalid required task capabilities");
   }

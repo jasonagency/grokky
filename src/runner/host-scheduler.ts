@@ -12,7 +12,7 @@ export class HostScheduler {
   recover(): void {
     for (const job of this.store.snapshot().jobs) {
       if (job.status === "queued") void this.start(job.id);
-      else if (job.status === "running") void this.interrupt(job.id, "Host restarted while the harness was running");
+      else if (job.status === "running" || job.status === "waiting-approval") void this.interrupt(job.id, `Host restarted while the harness was ${job.status === "waiting-approval" ? "waiting for approval" : "running"}`);
     }
   }
 
@@ -63,7 +63,9 @@ export class HostScheduler {
     resolver(true);
   }
 
-  private async interrupt(jobId: string, error: string): Promise<void> { await this.transition(jobId, "interrupted", error); }
+  shutdown(): void { for (const resolver of this.approvalResolvers.values()) resolver(false); this.approvalResolvers.clear(); for (const controller of this.controllers.values()) controller.abort(); this.controllers.clear(); }
+
+  private async interrupt(jobId: string, error: string): Promise<void> { await this.transition(jobId, "interrupted", error); const job = this.store.snapshot().jobs.find((item) => item.id === jobId); if (job) await this.sink.emit(job, "job.failed", { error, interrupted: true }); }
   private async transition(jobId: string, status: RemoteJobRecord["status"], error?: string): Promise<void> {
     await this.store.mutate((state) => { const job = state.jobs.find((item) => item.id === jobId); if (!job) throw new Error("Host job was not found"); job.status = status; job.updatedAt = this.now(); if (error) job.error = error; });
   }

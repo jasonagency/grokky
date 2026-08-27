@@ -48,6 +48,10 @@ export class HarnessRegistry {
     }
   }
 
+  ids(): string[] {
+    return [...this.adapters.keys()].sort();
+  }
+
   resolve(conversation: Pick<Conversation, "provider" | "harnessId">): HarnessAdapter {
     const id = conversation.harnessId || this.compatibilityId(conversation.provider);
     const adapter = this.adapters.get(id);

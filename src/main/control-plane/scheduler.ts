@@ -20,12 +20,19 @@ export interface TaskSchedulerOptions {
   id?: (prefix: string) => string;
 }
 
-export type TaskExecutor = (claim: TaskLeaseClaim) => Promise<Omit<TaskOutcome, "completedAt">>;
+export type TaskExecutor = (claim: TaskLeaseClaim) => Promise<Omit<TaskOutcome, "completedAt"> & { settledExternally?: boolean }>;
 
 export interface TaskDispatchResult {
   taskId: string;
-  status: "succeeded" | "failed";
+  status: "succeeded" | "failed" | "detached";
   error?: string;
+}
+
+export class TaskExecutionDetachedError extends Error {
+  constructor() {
+    super("Remote task monitor detached while host ownership remains active");
+    this.name = "TaskExecutionDetachedError";
+  }
 }
 
 function defaultId(prefix: string): string {
@@ -130,9 +137,10 @@ export class TaskScheduler {
       try {
         await this.start(claim.task.id, claim.lease.id);
         const outcome = await executor(claim);
-        await this.complete(claim.task.id, claim.lease.id, outcome);
+        if (!outcome.settledExternally) await this.complete(claim.task.id, claim.lease.id, outcome);
         return { taskId: claim.task.id, status: "succeeded" };
       } catch (error) {
+        if (error instanceof TaskExecutionDetachedError) return { taskId: claim.task.id, status: "detached" };
         const detail = error instanceof Error ? error.message : "Task executor failed";
         try {
           await this.fail(claim.task.id, claim.lease.id, detail);
@@ -184,6 +192,19 @@ export class TaskScheduler {
     }));
   }
 
+  async checkpointRemote(taskId: string, attemptId: string, cursor: string): Promise<void> {
+    const value = cursor.trim(); if (!value.startsWith("remote:") || value.length > 2_000) throw new Error("Remote checkpoint cursor is invalid");
+    await this.enqueue(async () => {
+      this.requireInitialized(); const now = this.now(); const candidate = new TaskGraph(this.graph.snapshot());
+      candidate.mutate((snapshot) => {
+        const task = snapshot.tasks.find((entry) => entry.id === taskId);
+        if (!task?.lease || task.lease.attemptId !== attemptId || !task.checkpoints.at(-1)?.cursor.startsWith("remote:")) throw new Error("Remote task ownership is stale or missing");
+        task.checkpoints.push({ id: this.id("checkpoint"), taskId, attemptId, cursor: value, recoverable: true, createdAt: now }); task.checkpoints = task.checkpoints.slice(-500); task.updatedAt = now;
+      });
+      await this.commitCandidate(candidate);
+    });
+  }
+
   async interrupt(taskId: string, leaseId: string, status: "paused" | "canceled"): Promise<void> {
     await this.enqueue(() => this.updateLeasedTask(taskId, leaseId, (task, now) => {
       const attempt = task.attempts.find((candidate) => candidate.id === task.lease!.attemptId);
@@ -226,6 +247,29 @@ export class TaskScheduler {
     }));
   }
 
+  async completeRemote(taskId: string, attemptId: string, outcome: Omit<TaskOutcome, "completedAt">): Promise<void> {
+    const summary = outcome.summary.trim();
+    if (!summary || summary.length > 4_000) throw new Error("Task outcome summary must be between 1 and 4,000 characters");
+    await this.settleRemote(taskId, attemptId, (task, attempt, now) => {
+      attempt.status = "succeeded";
+      attempt.completedAt = now;
+      task.status = "succeeded";
+      task.outcome = { ...structuredClone(outcome), summary, completedAt: now };
+    });
+  }
+
+  async failRemote(taskId: string, attemptId: string, error: string): Promise<void> {
+    const detail = error.trim();
+    if (!detail || detail.length > 4_000) throw new Error("Task failure must be between 1 and 4,000 characters");
+    await this.settleRemote(taskId, attemptId, (task, attempt, now) => {
+      attempt.status = "failed";
+      attempt.completedAt = now;
+      attempt.error = detail;
+      task.status = "failed";
+      task.outcome = { summary: detail, completedAt: now };
+    });
+  }
+
   reconcileExpiredLeases(): Promise<string[]> {
     return this.enqueue(() => this.reconcileExpiredLeasesUnlocked());
   }
@@ -235,7 +279,7 @@ export class TaskScheduler {
     const now = this.now();
     const snapshot = this.graph.snapshot();
     const expiredIds = snapshot.tasks
-      .filter((task) => (task.status === "leased" || task.status === "running") && task.lease && task.lease.expiresAt <= now)
+      .filter((task) => (task.status === "leased" || task.status === "running") && task.lease && task.lease.expiresAt <= now && !task.checkpoints.at(-1)?.cursor.startsWith("remote:"))
       .map((task) => task.id);
     if (!expiredIds.length) return [];
     const candidate = new TaskGraph(snapshot);
@@ -278,6 +322,28 @@ export class TaskScheduler {
       update(task, now);
     });
     await this.commitCandidate(candidate);
+  }
+
+  private async settleRemote(
+    taskId: string,
+    attemptId: string,
+    update: (task: TaskGraphSnapshot["tasks"][number], attempt: TaskGraphSnapshot["tasks"][number]["attempts"][number], now: number) => void,
+  ): Promise<void> {
+    await this.enqueue(async () => {
+      this.requireInitialized();
+      const now = this.now();
+      const candidate = new TaskGraph(this.graph.snapshot());
+      candidate.mutate((value) => {
+        const task = value.tasks.find((entry) => entry.id === taskId);
+        if (!task || !task.lease || task.lease.attemptId !== attemptId || !task.checkpoints.at(-1)?.cursor.startsWith("remote:")) throw new Error("Remote task ownership is stale or missing");
+        const attempt = task.attempts.find((entry) => entry.id === attemptId);
+        if (!attempt) throw new Error("Remote task attempt was not found");
+        update(task, attempt, now);
+        task.lease = undefined;
+        task.updatedAt = now;
+      });
+      await this.commitCandidate(candidate);
+    });
   }
 
   private async commitCandidate(candidate: TaskGraph): Promise<void> {

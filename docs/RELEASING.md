@@ -42,9 +42,10 @@ Use a hardware-backed or managed signing service when available. Rotate an expos
 2. Confirm the version is a strict semantic version. Stable uses `x.y.z`; beta uses `x.y.z-beta.n`.
 3. Review dependency advisories and document any accepted residual risk.
 4. Run the manual multi-agent operator scenario and retain trace evidence.
-5. Exercise the rollback drill below. Store its evidence identifier in the protected `stable-release` environment before a stable tag.
-6. Commit the version and release notes.
-7. Create and push an exact tag, such as `v1.4.0` or `v1.4.0-beta.2`.
+5. Run `npm run smoke:remote-host` on the provisioned host and retain the harness ID and terminal trace. On the reference Linux image, run `GROKKY_CHROMIUM_PATH=<path> npm run smoke:linux-screens`.
+6. Exercise the rollback drill below. Store its evidence identifier in the protected `stable-release` environment before a stable tag.
+7. Commit the version and release notes.
+8. Create and push an exact tag, such as `v1.4.0` or `v1.4.0-beta.2`.
 
 The workflow refuses a tag that does not exactly match `package.json`.
 

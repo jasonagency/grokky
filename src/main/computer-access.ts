@@ -16,6 +16,10 @@ import type { PersistedComputerAccess, PersistedRemoteDevice } from "./state-sto
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
 import { assertCompatibleProtocol, assertSecureRemoteEndpoint } from "../shared/remote-protocol";
 import type { ScreenSessionManager } from "../runner/screen-session-manager";
+import { FetchHostTransport, HostClient } from "./remote/host-client";
+import type { RemoteControlCommand, RemoteEventFrame, RemoteJobRecord, RemoteJobRequest } from "../shared/remote-protocol";
+import type { AgentScreenSnapshot } from "../shared/remote-protocol";
+import { FetchRemoteScreenTransport, ScreenClient } from "./remote/screen-client";
 
 export type ComputerToolName = WorkspaceToolName | "browse_url" | "capture_screen" | "open_application" | "click_screen" | "type_text";
 
@@ -175,6 +179,7 @@ export class ComputerAccessService {
   private readonly host: ComputerHostAdapter;
   private readonly secrets: ComputerAccessSecrets;
   private readonly screens?: ScreenSessionManager;
+  private readonly remoteScreens = new Map<string, AgentScreenSnapshot>();
 
   constructor(options: { host?: ComputerHostAdapter; secrets?: ComputerAccessSecrets; screens?: ScreenSessionManager } = {}) {
     this.host = options.host ?? defaultHostAdapter();
@@ -223,7 +228,7 @@ export class ComputerAccessService {
       networkAllowlist: [...state.networkAllowlist],
       auditLog: [...state.auditLog].sort((left, right) => right.createdAt - left.createdAt).slice(0, 120),
       ...(pendingApproval ? { pendingApproval } : {}),
-      ...(this.screens ? { screens: this.screens.snapshot() } : {}),
+      ...(activeRemote ? (this.remoteScreens.has(activeRemote.id) ? { screens: structuredClone(this.remoteScreens.get(activeRemote.id)!) } : {}) : this.screens ? { screens: this.screens.snapshot() } : {}),
     };
   }
 
@@ -350,9 +355,39 @@ export class ComputerAccessService {
     return a.length === b.length && timingSafeEqual(a, b);
   }
 
-  takeoverScreen(leaseId: string, epoch: number) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.takeover(leaseId, epoch); }
-  returnScreen(leaseId: string, epoch: number) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.returnControl(leaseId, epoch); }
-  lockScreen(leaseId: string, epoch: number) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.lock(leaseId, epoch); }
+  remoteHostClient(state: PersistedComputerAccess, deviceId: string): HostClient {
+    const device = state.remoteDevices.find((item) => item.id === deviceId && !item.revoked);
+    if (!device) throw new Error("Remote agent host is unavailable or revoked");
+    return new HostClient(device.endpoint, this.remoteCredential(device), new FetchHostTransport(device.endpoint));
+  }
+
+  async submitRemoteJob(state: PersistedComputerAccess, deviceId: string, request: RemoteJobRequest): Promise<{ client: HostClient; job: RemoteJobRecord }> {
+    const client = this.remoteHostClient(state, deviceId);
+    const capabilities = await client.connect();
+    if (capabilities.hostId !== deviceId) throw new Error("Paired device identity does not match the remote agent host");
+    if (!capabilities.harnesses.includes(request.harnessId)) throw new Error(`Remote host does not have a ready ${request.harnessId} harness`);
+    const job = await client.submit(request);
+    const device = state.remoteDevices.find((item) => item.id === deviceId);
+    if (device) device.lastSeenAt = Date.now();
+    return { client, job };
+  }
+
+  remoteEvents(client: HostClient, afterCursor: number): Promise<RemoteEventFrame[]> { return client.events(afterCursor); }
+  remoteControl(client: HostClient, command: RemoteControlCommand) { return client.control(command); }
+
+  async refreshRemoteScreens(state: PersistedComputerAccess): Promise<boolean> {
+    if (state.activeDeviceId === state.localDeviceId) return false;
+    const device = this.remoteDevice(state);
+    const screens = await this.remoteScreenClient(device).snapshot();
+    const changed = JSON.stringify(this.remoteScreens.get(device.id)) !== JSON.stringify(screens);
+    this.remoteScreens.set(device.id, screens);
+    device.lastSeenAt = Date.now();
+    return changed;
+  }
+
+  async takeoverScreen(state: PersistedComputerAccess, leaseId: string, epoch: number) { if (state.activeDeviceId === state.localDeviceId) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.takeover(leaseId, epoch); } const device = this.remoteDevice(state); const result = await this.remoteScreenClient(device).takeover(leaseId, epoch); await this.refreshRemoteScreens(state); return result; }
+  async returnScreen(state: PersistedComputerAccess, leaseId: string, epoch: number) { if (state.activeDeviceId === state.localDeviceId) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.returnControl(leaseId, epoch); } const device = this.remoteDevice(state); const result = await this.remoteScreenClient(device).returnControl(leaseId, epoch); await this.refreshRemoteScreens(state); return result; }
+  async lockScreen(state: PersistedComputerAccess, leaseId: string, epoch: number) { if (state.activeDeviceId === state.localDeviceId) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.lock(leaseId, epoch); } const device = this.remoteDevice(state); const result = await this.remoteScreenClient(device).lock(leaseId, epoch); await this.refreshRemoteScreens(state); return result; }
 
   private remoteDevice(state: PersistedComputerAccess): PersistedRemoteDevice {
     const device = state.remoteDevices.find((item) => item.id === state.activeDeviceId && !item.revoked);
@@ -369,6 +404,12 @@ export class ComputerAccessService {
       body: JSON.stringify(body),
     }, 125_000);
   }
+
+  private remoteScreenClient(device: PersistedRemoteDevice): ScreenClient {
+    return new ScreenClient(new FetchRemoteScreenTransport(device.endpoint, this.remoteCredential(device)));
+  }
+
+  private remoteCredential(device: PersistedRemoteDevice): string { const token = this.secrets.unseal(device.encryptedToken); if (!token) throw new Error("Remote computer credential is unavailable"); return token; }
 }
 
 export function newAuditId(): string {

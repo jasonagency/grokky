@@ -323,10 +323,16 @@ Runner endpoints:
 | `POST /pair` | Six-digit one-time code | Return the persistent bearer token and rotate the code |
 | `POST /test` | Bearer token | Test file or command capability |
 | `POST /execute` | Bearer token | Run one bounded workspace operation |
+| `POST /host/jobs` | Bearer token | Idempotently submit one durable harness attempt |
+| `POST /host/events` | Bearer token | Read signed ordered host events after a cursor |
+| `POST /host/control` | Bearer token | Cancel or approve work at a supported durable boundary |
+| `POST /host/screens/*` | Bearer token | Lease, capture, control, and revoke agent screens |
 
 The runner's disk state uses mode `0600`. Grokky stores only an Electron `safeStorage` encrypted form of the bearer token. HTTP transport is designed for loopback or an encrypted private overlay network, not direct public exposure.
 
-The agent-host protocol extends the files-only compatibility runner with independently versioned job submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. The desktop reconciles by durable cursor, ignores duplicates, requests a bounded replay at gaps, and retains stale-epoch writes only as diagnostics. Job submission is idempotent, so reconnecting or retrying the same occurrence does not create duplicate work. Harness credentials remain on the host; pairing gives the desktop only a revocable host credential encrypted by platform storage.
+With `--agent-host`, the runner constructs the same Codex App Server, Codex SDK fallback, OpenRouter, and Pi registry used by the desktop, but resolves readiness and credentials locally. Grokky-controlled workspace tools remain bounded by the runner root and startup flags. The protocol uses independently versioned job submission, signed ordered event frames, control commands, approvals, and cancellation. A host-issued lease epoch fences every attempt. Closing the desktop detaches monitoring without failing the attempt; reconnecting replays by cursor and settles the original task. Job submission is idempotent, so reconnecting or retrying an occurrence does not create duplicate work.
+
+Browser screen provisioning connects to a loopback Chrome DevTools endpoint and opens separate pages in one persistent browser profile. Linux desktop provisioning leases only the explicit non-root X displays named at startup. Both flow through `ScreenSessionManager`, so screenshots, input, takeover, locks, expiration, audit history, and shared-trust labels use one contract.
 
 ## Skills, MCP, connectors, and agents
 

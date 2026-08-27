@@ -36,7 +36,7 @@ import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, Control
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { LeaseReconciler } from "./control-plane/lease-reconciler";
-import type { TaskScheduler } from "./control-plane/scheduler";
+import { TaskExecutionDetachedError, type TaskScheduler } from "./control-plane/scheduler";
 import type { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
 import { GitRepository } from "./workspaces/git-repository";
 import type { IntegrationQueue, VerificationCommand } from "./workspaces/integration-queue";
@@ -61,6 +61,9 @@ import type { MailboxService } from "./team/mailbox-service";
 import type { MemoryService } from "./team/memory-service";
 import type { RoutineService } from "./team/routine-service";
 import type { UpdateService } from "./update-service";
+import type { HostClient } from "./remote/host-client";
+import type { RemoteEventFrame } from "../shared/remote-protocol";
+import { validateHarnessEvent } from "./harnesses/types";
 
 function id(): string {
   return randomUUID().replaceAll("-", "");
@@ -107,9 +110,11 @@ export class MainController {
   private readonly sessionComputerGrants = new Map<string, Set<ComputerCapabilityId>>();
   private routineTimer?: ReturnType<typeof setInterval>;
   private taskDispatchTimer?: ReturnType<typeof setInterval>;
+  private remoteScreenTimer?: ReturnType<typeof setInterval>;
   private taskDispatchPromise?: Promise<void>;
   private readonly taskControllers = new Map<string, AbortController>();
   private readonly taskSessions = new Map<string, string>();
+  private readonly remoteTaskClients = new Map<string, { client: HostClient; jobId: string; leaseEpoch: number; cursor: number }>();
   private readonly capabilities: CapabilitiesService;
   private readonly agents: AgentService;
   private unsubscribeProjection?: () => void;
@@ -149,6 +154,8 @@ export class MainController {
       await this.taskScheduler.initialize();
       await new LeaseReconciler(this.taskScheduler).reconcileExpired();
     }
+    this.remoteScreenTimer = setInterval(() => { void this.refreshRemoteScreens(); }, 3_000);
+    await this.refreshRemoteScreens();
     await this.workspaceLeases?.initialize();
     await this.steering?.initialize();
     await this.notifications?.initialize();
@@ -167,6 +174,7 @@ export class MainController {
     this.initialized = true;
     if (this.taskScheduler) {
       this.taskDispatchTimer = setInterval(() => this.scheduleTaskDispatch(), 1_000);
+      this.resumeRemoteTasks();
       this.scheduleTaskDispatch();
     }
     if (this.updates) {
@@ -188,6 +196,7 @@ export class MainController {
     this.initialized = false;
     if (this.routineTimer) clearInterval(this.routineTimer);
     if (this.taskDispatchTimer) clearInterval(this.taskDispatchTimer);
+    if (this.remoteScreenTimer) clearInterval(this.remoteScreenTimer);
     this.unsubscribeProjection?.();
     this.unsubscribeProjection = undefined;
     this.unsubscribeUpdate?.();
@@ -232,6 +241,7 @@ export class MainController {
             sourceConversationId: source.id,
             workspace: source.workingDirectory,
             workspaceMode: source.sandboxMode === "workspace-write" ? "write" as const : "read" as const,
+            ...(this.state.computerAccess.activeDeviceId !== this.state.computerAccess.localDeviceId ? { targetHostId: this.state.computerAccess.activeDeviceId } : {}),
             ...(!node.assignment?.harnessId || node.assignment.harnessId === source.harnessId ? { model: source.model } : {}),
           } : {}),
           ...structuredClone(node.assignment ?? {}),
@@ -268,6 +278,24 @@ export class MainController {
           : request.type === "stop" ? { type: "cancel" as const }
             : null;
     const activeLease = (task.status === "leased" || task.status === "running") ? task.lease : undefined;
+    const remote = this.remoteTaskClients.get(taskId);
+    if (remote && activeLease) {
+      const remoteType = request.type === "stop" ? "cancel" : request.type === "approve" ? "approve" : undefined;
+      if (!remoteType) {
+        await this.steering.deliver(command.id, async () => ({ accepted: false, reason: "This paired host currently supports cancellation and approval controls at durable boundaries" }));
+      } else {
+        await this.steering.deliver(command.id, () => this.computerAccess.remoteControl(remote.client, {
+          id: command.id.replace(/[^a-zA-Z0-9:_-]/g, "-"), jobId: remote.jobId, leaseEpoch: remote.leaseEpoch, afterCursor: remote.cursor,
+          type: remoteType, ...(remoteType === "approve" ? { decision: "allow" as const } : {}),
+        }));
+        if (remoteType === "cancel") {
+          this.taskControllers.get(taskId)?.abort();
+          await this.taskScheduler.interrupt(taskId, activeLease.id, "canceled");
+        }
+      }
+      this.publishSnapshot();
+      return;
+    }
     if (activeLease && (request.type === "pause" || request.type === "stop")) {
       this.taskControllers.get(taskId)?.abort();
       await this.taskScheduler.interrupt(taskId, activeLease.id, request.type === "pause" ? "paused" : "canceled");
@@ -630,11 +658,13 @@ export class MainController {
 
   async pairComputer(endpoint: string, code: string): Promise<void> {
     await this.computerAccess.pair(this.state.computerAccess, endpoint, code);
+    await this.refreshRemoteScreens();
     await this.commit();
   }
 
   async selectComputer(deviceId: string): Promise<void> {
     this.computerAccess.select(this.state.computerAccess, deviceId);
+    await this.refreshRemoteScreens();
     await this.commit();
   }
 
@@ -643,14 +673,23 @@ export class MainController {
     await this.commit();
   }
 
+  private async refreshRemoteScreens(): Promise<void> {
+    try {
+      const changed = await this.computerAccess.refreshRemoteScreens(this.state.computerAccess);
+      if (changed && this.initialized) this.publishSnapshot();
+    } catch {
+      // Files-only runners and temporarily disconnected hosts have no screen projection to refresh.
+    }
+  }
+
   async updateComputerNetworkAllowlist(domains: string[]): Promise<void> {
     this.state.computerAccess.networkAllowlist = [...new Set(domains.map((domain) => domain.trim().toLowerCase()).filter(Boolean))].slice(0, 100);
     await this.commit();
   }
 
-  takeoverScreen(leaseId: string, epoch: number): void { this.computerAccess.takeoverScreen(leaseId, epoch); this.publishSnapshot(); }
-  returnScreen(leaseId: string, epoch: number): void { this.computerAccess.returnScreen(leaseId, epoch); this.publishSnapshot(); }
-  lockScreen(leaseId: string, epoch: number): void { this.computerAccess.lockScreen(leaseId, epoch); this.publishSnapshot(); }
+  async takeoverScreen(leaseId: string, epoch: number): Promise<void> { await this.computerAccess.takeoverScreen(this.state.computerAccess, leaseId, epoch); this.publishSnapshot(); }
+  async returnScreen(leaseId: string, epoch: number): Promise<void> { await this.computerAccess.returnScreen(this.state.computerAccess, leaseId, epoch); this.publishSnapshot(); }
+  async lockScreen(leaseId: string, epoch: number): Promise<void> { await this.computerAccess.lockScreen(this.state.computerAccess, leaseId, epoch); this.publishSnapshot(); }
 
   async resolveComputerApproval(approvalId: string, decision: ComputerApprovalDecision): Promise<void> {
     const index = this.pendingApprovals.findIndex((approval) => approval.id === approvalId);
@@ -849,7 +888,18 @@ export class MainController {
           ...structuredClone(routine.template),
           id: prefix,
           title: `${routine.name} · ${new Date(routine.nextFireAt).toLocaleDateString()}`,
-          nodes: routine.template.nodes.map((node) => ({ ...structuredClone(node), id: idMap.get(node.id)!, dependsOn: (node.dependsOn ?? []).map((id) => idMap.get(id) ?? id), assignment: { ...node.assignment, agentId: node.assignment?.agentId ?? routine.ownerAgentId } })),
+          nodes: routine.template.nodes.map((node) => ({
+            ...structuredClone(node),
+            id: idMap.get(node.id)!,
+            dependsOn: (node.dependsOn ?? []).map((id) => idMap.get(id) ?? id),
+            assignment: {
+              ...node.assignment,
+              agentId: node.assignment?.agentId ?? routine.ownerAgentId,
+              ...(routine.targetHostId !== "local" ? { targetHostId: routine.targetHostId } : {}),
+              budgetUsd: node.assignment?.budgetUsd ?? routine.budgetUsd,
+              approvalPolicy: node.assignment?.approvalPolicy ?? (routine.approvalBoundary === "never" ? "allow" : "ask"),
+            },
+          })),
         });
       }
       await this.routines.acknowledge(routine.id, occurrenceKey);
@@ -882,8 +932,7 @@ export class MainController {
     this.taskDispatchPromise = run;
   }
 
-  private async executeTaskClaim(claim: TaskLeaseClaim): Promise<{ summary: string }> {
-    if (!this.workspaceLeases) throw new Error("Workspace isolation is required to execute task graphs");
+  private async executeTaskClaim(claim: TaskLeaseClaim): Promise<{ summary: string; settledExternally?: boolean }> {
     const assignment = claim.task.assignment;
     const source = this.state.conversations.find((conversation) => conversation.id === assignment.sourceConversationId)
       ?? this.state.conversations.find((conversation) => conversation.id === this.state.activeConversationId)
@@ -892,9 +941,14 @@ export class MainController {
     const harnessId = assignment.harnessId ?? source.harnessId;
     if (!harnessId) throw new Error("Task execution requires an assigned harness");
     const descriptor = this.harnesses.find((entry) => entry.id === harnessId);
-    if (!descriptor?.health.ready) throw new Error(descriptor?.health.detail || `Harness ${harnessId} is not ready`);
+    if (!descriptor) throw new Error(`Harness ${harnessId} is not registered`);
     const model = assignment.model ?? (source.harnessId === harnessId ? source.model : descriptor.models[0]?.id) ?? "auto";
     if (!descriptor.models.some((entry) => entry.dynamic || entry.id === model)) throw new Error(`Model ${model} is not supported by harness ${harnessId}`);
+    if (assignment.targetHostId && assignment.targetHostId !== this.state.computerAccess.localDeviceId) {
+      return this.executeRemoteTaskClaim(claim, source, harnessId, model);
+    }
+    if (!descriptor.health.ready) throw new Error(descriptor.health.detail || `Harness ${harnessId} is not ready`);
+    if (!this.workspaceLeases) throw new Error("Workspace isolation is required to execute task graphs");
     const workspace = assignment.workspace ?? source.workingDirectory;
     const workspaceMode = assignment.workspaceMode ?? (source.sandboxMode === "workspace-write" ? "write" : "read");
     const workspaceLease = await this.workspaceLeases.acquire({
@@ -1028,6 +1082,144 @@ export class MainController {
       this.taskSessions.delete(claim.task.id);
       this.publishSnapshot();
     }
+  }
+
+  private resumeRemoteTasks(): void {
+    if (!this.taskScheduler) return;
+    for (const task of this.taskScheduler.snapshot().tasks) {
+      if ((task.status !== "leased" && task.status !== "running") || !task.lease || !task.checkpoints.at(-1)?.cursor.startsWith("remote:")) continue;
+      if (this.taskControllers.has(task.id)) continue;
+      const claim: TaskLeaseClaim = { task, lease: task.lease, checkpoint: task.checkpoints.at(-1) };
+      void this.executeTaskClaim(claim).catch(async (error) => {
+        if (error instanceof TaskExecutionDetachedError) return;
+        await this.notifications?.notify({ type: "remote-disconnect", title: "Remote task needs attention", body: error instanceof Error ? error.message : "Remote task monitoring failed", taskId: task.id });
+      });
+    }
+  }
+
+  private async executeRemoteTaskClaim(claim: TaskLeaseClaim, source: Conversation, harnessId: string, model: string): Promise<{ summary: string; settledExternally: true }> {
+    if (!this.taskScheduler) throw new Error("The task scheduler is not available");
+    const targetHostId = claim.task.assignment.targetHostId;
+    if (!targetHostId) throw new Error("Remote task is missing its target host");
+    const controller = new AbortController();
+    this.taskControllers.set(claim.task.id, controller);
+    const agent = claim.task.assignment.agentId
+      ? (await this.agents.list(source.workingDirectory)).find((entry) => entry.id === claim.task.assignment.agentId)
+      : undefined;
+    const jobId = `job:${claim.lease.attemptId}`;
+    const leaseEpoch = claim.task.attempts.find((attempt) => attempt.id === claim.lease.attemptId)?.number ?? claim.task.attempts.length;
+    let client: HostClient;
+    let cursor = this.remoteCheckpointCursor(claim.checkpoint?.cursor);
+    try {
+      const submitted = await this.computerAccess.submitRemoteJob(this.state.computerAccess, targetHostId, {
+        id: jobId,
+        idempotencyKey: claim.lease.idempotencyKey,
+        taskId: claim.task.id,
+        attemptId: claim.lease.attemptId,
+        leaseEpoch,
+        harnessId,
+        payload: {
+          prompt: [claim.task.description || claim.task.title, claim.checkpoint && !claim.checkpoint.cursor.startsWith("remote:") ? `Resume from checkpoint: ${claim.checkpoint.cursor}` : ""].filter(Boolean).join("\n\n"),
+          model,
+          reasoning: source.reasoning,
+          sandboxMode: claim.task.assignment.workspaceMode === "read" ? "read-only" : source.sandboxMode,
+          allowCommands: claim.task.assignment.workspaceMode !== "read" && source.allowCommands,
+          ...(claim.task.assignment.screenKind ? { screenKind: claim.task.assignment.screenKind } : {}),
+          ...(agent ? { agents: [agent] } : {}),
+          ...this.remoteSessionPayload(claim.task.assignment.agentId, harnessId),
+        },
+        approvalPolicy: claim.task.assignment.approvalPolicy ?? "ask",
+        budgetUsd: claim.task.assignment.budgetUsd ?? this.steering?.snapshot().budgetPolicy.hard.costUsd ?? 10,
+      });
+      client = submitted.client;
+      this.remoteTaskClients.set(claim.task.id, { client, jobId, leaseEpoch, cursor });
+      if (!claim.checkpoint?.cursor.startsWith("remote:")) {
+        await this.taskScheduler.checkpoint(claim.task.id, claim.lease.id, { cursor: `remote:${JSON.stringify({ hostId: targetHostId, jobId, leaseEpoch })}`, recoverable: true });
+      }
+      await this.recordTaskEvent(claim, "diagnostic.recorded", { remote: { hostId: targetHostId, jobId, leaseEpoch, status: submitted.job.status } });
+      let retryMs = 250;
+      while (!controller.signal.aborted) {
+        try {
+          const frames = await this.computerAccess.remoteEvents(client, cursor);
+          retryMs = 250;
+          for (const frame of frames) {
+            cursor = Math.max(cursor, frame.cursor);
+            const active = this.remoteTaskClients.get(claim.task.id);
+            if (active) active.cursor = cursor;
+            if (frame.jobId !== jobId || frame.leaseEpoch !== leaseEpoch) continue;
+            const terminal = await this.applyRemoteTaskFrame(claim, frame, harnessId);
+            await this.taskScheduler.checkpointRemote(claim.task.id, claim.lease.attemptId, `remote:${JSON.stringify({ hostId: targetHostId, jobId, leaseEpoch, cursor })}`);
+            if (terminal) {
+              this.remoteTaskClients.delete(claim.task.id);
+              if (terminal.status === "succeeded") {
+                await this.taskScheduler.completeRemote(claim.task.id, claim.lease.attemptId, { summary: terminal.summary });
+                return { summary: terminal.summary, settledExternally: true };
+              }
+              await this.taskScheduler.failRemote(claim.task.id, claim.lease.attemptId, terminal.summary);
+              throw new Error(terminal.summary);
+            }
+          }
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          if (error instanceof Error && /authorization|incompatible|signature|stale lease|invalid harness/i.test(error.message)) throw error;
+          retryMs = Math.min(retryMs * 2, 5_000);
+        }
+        await this.waitForRemotePoll(retryMs, controller.signal);
+      }
+      throw new TaskExecutionDetachedError();
+    } finally {
+      if (this.taskControllers.get(claim.task.id) === controller) this.taskControllers.delete(claim.task.id);
+      if (controller.signal.aborted) this.remoteTaskClients.delete(claim.task.id);
+      this.publishSnapshot();
+    }
+  }
+
+  private async applyRemoteTaskFrame(claim: TaskLeaseClaim, frame: RemoteEventFrame, harnessId: string): Promise<{ status: "succeeded" | "failed"; summary: string } | undefined> {
+    if (frame.type === "job.output" && frame.payload && typeof frame.payload === "object" && "event" in frame.payload) {
+      const event = validateHarnessEvent((frame.payload as { event: ProviderEvent }).event);
+      if (event?.type === "thread" && claim.task.assignment.agentId) await this.teamRuntime?.rememberSession(claim.task.assignment.agentId, harnessId, event.threadId);
+      if (event?.type) await this.recordRemoteTaskEvent(claim, frame, this.taskEventType(event), this.taskEventPayload(event));
+    } else {
+      await this.recordRemoteTaskEvent(claim, frame, "diagnostic.recorded", { remote: { cursor: frame.cursor, type: frame.type, payload: frame.payload } });
+    }
+    if (frame.type === "job.approval") await this.notifications?.notify({ type: "approval", title: "Remote task needs approval", body: `Task ${claim.task.title} is waiting on its paired host.`, taskId: claim.task.id });
+    if (frame.type === "job.completed") return { status: "succeeded", summary: this.remoteSummary(frame.payload, `Completed ${claim.task.title}`) };
+    if (frame.type === "job.failed" || frame.type === "job.canceled") return { status: "failed", summary: this.remoteSummary(frame.payload, `Remote task ${frame.type === "job.canceled" ? "was canceled" : "failed"}`) };
+    return undefined;
+  }
+
+  private remoteSummary(payload: unknown, fallback: string): string {
+    if (payload && typeof payload === "object") {
+      const value = "output" in payload ? (payload as { output?: unknown }).output : "error" in payload ? (payload as { error?: unknown }).error : undefined;
+      if (typeof value === "string" && value.trim()) return value.trim().slice(0, 4_000);
+    }
+    return fallback;
+  }
+
+  private remoteSessionPayload(agentId: string | undefined, harnessId: string): { threadId?: string } {
+    if (!agentId) return {};
+    const threadId = this.teamRuntime?.snapshot().agents.find((entry) => entry.id === agentId)?.sessionReferences[harnessId];
+    return threadId ? { threadId } : {};
+  }
+
+  private remoteCheckpointCursor(value: string | undefined): number {
+    if (!value?.startsWith("remote:")) return 0;
+    try { const parsed = JSON.parse(value.slice("remote:".length)) as { cursor?: unknown }; return Number.isSafeInteger(parsed.cursor) && Number(parsed.cursor) >= 0 ? Number(parsed.cursor) : 0; }
+    catch { return 0; }
+  }
+
+  private async recordRemoteTaskEvent(claim: TaskLeaseClaim, frame: RemoteEventFrame, type: ControlPlaneEventType, payload: unknown): Promise<void> {
+    if (!this.controlPlane) return;
+    await this.controlPlane.record({ id: `remote:${frame.jobId}:${frame.cursor}`, aggregateId: claim.task.id, taskId: claim.task.id, attemptId: claim.lease.attemptId, source: "grokky.remote-host", type, payload, timestamp: frame.timestamp });
+  }
+
+  private waitForRemotePoll(delayMs: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolvePromise) => {
+      if (signal.aborted) { resolvePromise(); return; }
+      const timer = setTimeout(done, delayMs);
+      function done() { clearTimeout(timer); signal.removeEventListener("abort", done); resolvePromise(); }
+      signal.addEventListener("abort", done, { once: true });
+    });
   }
 
   private async checkpointTaskWorkspace(lease: WorkspaceLease, title: string): Promise<string | undefined> {

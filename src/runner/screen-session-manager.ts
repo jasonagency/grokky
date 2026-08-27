@@ -16,6 +16,7 @@ export class ScreenSessionManager {
   private history: AgentScreenSnapshot["history"] = [];
   private readonly providers = new Map<ScreenKind, ScreenProvider>();
   constructor(providers: ScreenProvider[] = [], private readonly now = Date.now, private readonly leaseMs = 5 * 60_000, private readonly onAudit?: (entry: ScreenAuditEntry) => void) { for (const provider of providers) this.providers.set(provider.kind, provider); }
+  kinds(): ScreenKind[] { return [...this.providers.keys()].sort(); }
   snapshot(): AgentScreenSnapshot { this.expire(); return structuredClone({ leases: this.leases, audit: this.audit.slice(-500), history: this.history.slice(-100) }); }
 
   async lease(agentId: string, kind: ScreenKind): Promise<ScreenLease> {
