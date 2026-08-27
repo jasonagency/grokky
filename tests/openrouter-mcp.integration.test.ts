@@ -39,15 +39,38 @@ describe("OpenRouter MCP integration", () => {
     const { conversation, settings, computer } = fixture();
     const events: ProviderEvent[] = [];
     const executeMcpTool = vi.fn(async () => "official MCP result");
+    const mcpParameters = {
+      type: "object",
+      properties: { q: { type: "string" }, limit: { type: "integer" } },
+      required: ["q"],
+      additionalProperties: false,
+    };
     await runOpenRouter({
       conversation, settings, agents: [], prompt: "Research MCP", signal: new AbortController().signal, apiKey: "test",
       ...computer,
-      mcpTools: [{ serverId: "docs", originalName: "search", name: "mcp_docs_search_abcd1234", description: "Search docs", parameters: { type: "object", properties: { q: { type: "string" } } }, classification: "read", classificationSource: "operator" }],
+      mcpTools: [{
+        serverId: "docs",
+        originalName: "search",
+        name: "mcp_docs_search_abcd1234",
+        description: "Search docs",
+        parameters: mcpParameters,
+        classification: "read",
+        classificationSource: "operator",
+      }],
       executeMcpTool,
       onEvent: async (event) => { events.push(event); },
     });
     const request = sdk.send.mock.calls[0]![0].chatRequest;
-    expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "mcp_docs_search_abcd1234" }) })]));
+    expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({
+      function: expect.objectContaining({
+        name: "mcp_docs_search_abcd1234",
+        strict: false,
+        parameters: mcpParameters,
+      }),
+    })]));
+    expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({
+      function: expect.objectContaining({ name: "list_files", strict: true }),
+    })]));
     expect(JSON.stringify(request)).not.toContain("OPENROUTER_API_KEY");
     expect(executeMcpTool).toHaveBeenCalledWith("mcp_docs_search_abcd1234", { q: "MCP" }, { readOnly: false });
     expect(events.filter((event) => event.type === "final")).toEqual([{ type: "final", text: "Gateway result accepted." }]);
