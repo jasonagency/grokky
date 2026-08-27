@@ -1144,11 +1144,12 @@ function QualityLab({ onError }: { onError(error: string): void }) {
   </div>;
 }
 
-function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsChange, onClose, onError }: {
+function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRequest, onAgentsChange, onClose, onError }: {
   snapshot: AppSnapshot;
   conversation: Conversation;
   agents: AgentDefinition[];
   initialTab: SettingsTab;
+  openTaskRequest?: { taskId: string; nonce: string };
   onAgentsChange(agents: AgentDefinition[]): void;
   onClose(): void;
   onError(error: string): void;
@@ -1563,7 +1564,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
 
             {tab === "quality" && <QualityLab onError={onError} />}
 
-            {tab === "tasks" && <TaskControlRoom snapshot={snapshot} onError={onError} />}
+            {tab === "tasks" && <TaskControlRoom snapshot={snapshot} openTaskRequest={openTaskRequest} onError={onError} />}
 
             {tab === "skills" && (
               <div className="settings-stack capability-stack">
@@ -1789,6 +1790,7 @@ export function App() {
   const [search, setSearch] = useState("");
   const [uiError, setUiError] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
+  const [taskOpenRequest, setTaskOpenRequest] = useState<{ taskId: string; nonce: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState(false);
@@ -1806,6 +1808,10 @@ export function App() {
         else conversations.unshift(change.conversation);
         return { ...current, conversations };
       });
+    });
+    window.grokky.onOpenTask((taskId) => {
+      setTaskOpenRequest({ taskId, nonce: crypto.randomUUID() });
+      setSettingsTab("tasks");
     });
   }, []);
 
@@ -1980,7 +1986,7 @@ export function App() {
         <Composer conversation={active} agents={agents} recentDirectories={snapshot.settings.recentWorkingDirectories} multiAgentEnabled={snapshot.settings.multiAgentEnabled} maxAgents={snapshot.settings.maxAgentThreads} webSearchEnabled={snapshot.settings.webSearchEnabled} onOpenAgents={() => setSettingsTab("agents")} onError={setUiError} />
       </main>
 
-      {settingsTab && <SettingsDialog snapshot={snapshot} conversation={active} agents={agents} initialTab={settingsTab} onAgentsChange={setAgents} onClose={() => setSettingsTab(null)} onError={setUiError} />}
+      {settingsTab && <SettingsDialog snapshot={snapshot} conversation={active} agents={agents} initialTab={settingsTab} openTaskRequest={taskOpenRequest ?? undefined} onAgentsChange={setAgents} onClose={() => setSettingsTab(null)} onError={setUiError} />}
 
       {pendingDelete && <DeleteConversationDialog title={pendingDelete.title} busy={deleteBusy} onCancel={() => { if (!deleteBusy) setPendingDelete(null); }} onConfirm={() => void confirmDelete()} />}
 

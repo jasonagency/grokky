@@ -36,7 +36,7 @@ import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, Control
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { LeaseReconciler } from "./control-plane/lease-reconciler";
-import { TaskExecutionDetachedError, type TaskScheduler } from "./control-plane/scheduler";
+import { TaskExecutionDetachedError, TaskExecutionPausedError, type TaskScheduler } from "./control-plane/scheduler";
 import type { WorkspaceLeaseManager } from "./workspaces/workspace-lease-manager";
 import { GitRepository } from "./workspaces/git-repository";
 import type { IntegrationQueue, VerificationCommand } from "./workspaces/integration-queue";
@@ -64,6 +64,7 @@ import type { UpdateService } from "./update-service";
 import type { HostClient } from "./remote/host-client";
 import type { RemoteEventFrame, RemoteRoutineRegistration } from "../shared/remote-protocol";
 import { validateHarnessEvent } from "./harnesses/types";
+import { localBackgroundWork, type LocalBackgroundWork } from "./app-lifecycle";
 
 function id(): string {
   return randomUUID().replaceAll("-", "");
@@ -115,6 +116,7 @@ export class MainController {
   private taskDispatchPromise?: Promise<void>;
   private readonly taskControllers = new Map<string, AbortController>();
   private readonly taskSessions = new Map<string, string>();
+  private readonly pendingTaskPauses = new Map<string, string>();
   private readonly remoteTaskClients = new Map<string, { client: HostClient; jobId: string; leaseEpoch: number; cursor: number }>();
   private readonly routineSyncFailures = new Set<string>();
   private readonly capabilities: CapabilitiesService;
@@ -233,6 +235,11 @@ export class MainController {
     });
   }
 
+  localBackgroundWork(): LocalBackgroundWork {
+    if (!this.state) return { conversationIds: [], taskIds: [] };
+    return localBackgroundWork(this.state.conversations, this.taskScheduler?.snapshot().tasks ?? [], this.state.computerAccess.localDeviceId);
+  }
+
   async createTaskGoal(draft: TaskGoalDraft): Promise<void> {
     if (!this.taskScheduler) throw new Error("The task scheduler is not available");
     const source = this.state.conversations.find((conversation) => conversation.id === this.state.activeConversationId) ?? this.state.conversations[0];
@@ -300,14 +307,18 @@ export class MainController {
       this.publishSnapshot();
       return;
     }
-    if (activeLease && (request.type === "pause" || request.type === "stop")) {
+    if (activeLease && request.type === "pause") {
+      this.pendingTaskPauses.set(taskId, activeLease.id);
+      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Pause queued for the next safe boundary" }));
+    } else if (activeLease && request.type === "stop") {
+      this.pendingTaskPauses.delete(taskId);
       this.taskControllers.get(taskId)?.abort();
-      await this.taskScheduler.interrupt(taskId, activeLease.id, request.type === "pause" ? "paused" : "canceled");
+      await this.taskScheduler.interrupt(taskId, activeLease.id, "canceled");
       if (task.assignment.harnessId) {
         const sessionId = this.taskSessions.get(taskId);
         await this.harnessRegistry.deliverControl(task.assignment.harnessId, { type: "cancel", ...(sessionId ? { sessionId } : {}) }).catch(() => ({ accepted: false }));
       }
-      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: request.type === "pause" ? "Paused and fenced by the Grokky scheduler" : "Canceled and fenced by the Grokky scheduler" }));
+      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Canceled and fenced by the Grokky scheduler" }));
     } else if (localAction && (!activeLease || request.type === "reprioritize")) {
       await this.taskScheduler.applyAction(taskId, localAction);
       await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Applied by the Grokky scheduler" }));
@@ -1133,6 +1144,7 @@ export class MainController {
         claim.checkpoint ? `Resume from checkpoint: ${claim.checkpoint.cursor}` : "",
         workspaceLease.kind === "git" && workspaceLease.writable ? "Work only in the assigned isolated worktree. Grokky will checkpoint completed changes into its task branch." : "",
       ].filter(Boolean).join("\n\n");
+      await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
       await this.recordTaskEvent(claim, "run.started", { prompt, workspaceLeaseId: workspaceLease.id, harnessId });
       await this.harnessRegistry.dispatch(conversation, {
         conversation,
@@ -1142,11 +1154,22 @@ export class MainController {
         signal: controller.signal,
         selectedSkillPaths,
         computerAccess: structuredClone(this.state.computerAccess),
-        executeTool: (name, args, options) => this.executeTaskComputerTool(claim, conversation, workspaceLease, name, args, options),
+        executeTool: async (name, args, options) => {
+          await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
+          const output = await this.executeTaskComputerTool(claim, conversation, workspaceLease, name, args, options);
+          await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
+          return output;
+        },
         controlTask: (taskId, request) => this.controlTask(taskId, request),
         mcpTools: preparedMcp.tools,
-        executeMcpTool: (name, args, options) => this.executeMcpTool(source.id, mcpConfigurations, name, args, controller.signal, options?.readOnly === true),
+        executeMcpTool: async (name, args, options) => {
+          await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
+          const output = await this.executeMcpTool(source.id, mcpConfigurations, name, args, controller.signal, options?.readOnly === true);
+          await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
+          return output;
+        },
         onEvent: async (event) => {
+          await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
           if (event.type === "thread") {
             this.taskSessions.set(claim.task.id, event.threadId);
             if (assignment.agentId) await this.teamRuntime?.rememberSession(assignment.agentId, harnessId, event.threadId);
@@ -1173,6 +1196,7 @@ export class MainController {
         tools: true,
         ...this.taskRequiredCapabilities(assignment.requiredCapabilities),
       });
+      await this.pauseTaskAtBoundary(claim, controller, workspaceLease);
       if (heartbeatFailure) throw heartbeatFailure;
       if (workspaceLease.kind === "git" && workspaceLease.writable) {
         const commit = await this.checkpointTaskWorkspace(workspaceLease, claim.task.title);
@@ -1194,8 +1218,25 @@ export class MainController {
       }
       if (this.taskControllers.get(claim.task.id) === controller) this.taskControllers.delete(claim.task.id);
       this.taskSessions.delete(claim.task.id);
+      this.pendingTaskPauses.delete(claim.task.id);
       this.publishSnapshot();
     }
+  }
+
+  private async pauseTaskAtBoundary(claim: TaskLeaseClaim, controller: AbortController, workspaceLease: WorkspaceLease): Promise<void> {
+    if (this.pendingTaskPauses.get(claim.task.id) !== claim.lease.id) return;
+    if (workspaceLease.kind === "git" && workspaceLease.writable) {
+      try {
+        const commit = await this.checkpointTaskWorkspace(workspaceLease);
+        if (commit) await this.taskScheduler?.checkpoint(claim.task.id, claim.lease.id, { cursor: `git:${commit}`, recoverable: true });
+      } catch (error) {
+        await this.recordTaskEvent(claim, "diagnostic.recorded", { checkpoint: { status: "failed", error: error instanceof Error ? error.message : "Task checkpoint failed" } });
+      }
+    }
+    this.pendingTaskPauses.delete(claim.task.id);
+    controller.abort();
+    await this.taskScheduler?.interrupt(claim.task.id, claim.lease.id, "paused");
+    throw new TaskExecutionPausedError();
   }
 
   private resumeRemoteTasks(): void {
@@ -1336,7 +1377,7 @@ export class MainController {
     });
   }
 
-  private async checkpointTaskWorkspace(lease: WorkspaceLease, title: string): Promise<string | undefined> {
+  private async checkpointTaskWorkspace(lease: WorkspaceLease, title = "safe-boundary checkpoint"): Promise<string | undefined> {
     const repository = await GitRepository.open(lease.root);
     if (!await repository.status(lease.root)) return undefined;
     await repository.git(["add", "--all", "--"], { cwd: lease.root });

@@ -446,12 +446,14 @@ export interface GrokkyApi {
   openExternal(url: string): Promise<void>;
   onSnapshot(listener: (snapshot: AppSnapshot) => void): void;
   onProjection(listener: (change: ProjectionChange) => void): void;
+  onOpenTask(listener: (taskId: string) => void): void;
 }
 
 export const IPC = {
   snapshotGet: "grokky:snapshot:get",
   snapshotChanged: "grokky:snapshot:changed",
   projectionChanged: "grokky:projection:changed",
+  taskOpen: "grokky:tasks:open",
   conversationCreate: "grokky:conversation:create",
   conversationActivate: "grokky:conversation:activate",
   conversationUpdate: "grokky:conversation:update",

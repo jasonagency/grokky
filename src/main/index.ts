@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, Notification, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from "electron";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MainController } from "./controller";
@@ -31,8 +31,10 @@ import { createElectronUpdateAdapter, DisabledUpdateAdapter, UpdateService } fro
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
 let mainController: MainController | null = null;
+let tray: Tray | null = null;
 let databaseClosed = false;
 let databaseClosing = false;
+let explicitQuitRequested = false;
 
 if (process.env.GROKKY_USER_DATA_PATH) app.setPath("userData", process.env.GROKKY_USER_DATA_PATH);
 
@@ -68,9 +70,31 @@ async function createWindow(controller: MainController): Promise<void> {
   });
 
   controller.attachWindow(mainWindow);
+  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.on("closed", () => { mainWindow = null; });
   if (process.env.ELECTRON_RENDERER_URL) await mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   else await mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+}
+
+async function showTask(taskId?: string): Promise<void> {
+  if (!mainController) return;
+  if (!mainWindow || mainWindow.isDestroyed()) await createWindow(mainController);
+  mainWindow?.show();
+  mainWindow?.focus();
+  if (taskId) mainWindow?.webContents.send(IPC.taskOpen, taskId);
+}
+
+function ensureTray(): void {
+  if (tray || !app.isReady()) return;
+  const image = nativeImage.createFromPath(join(app.getAppPath(), "build/icon-mascot.png")).resize({ width: 18, height: 18 });
+  tray = new Tray(image);
+  tray.setToolTip("Grokky is running local agent work");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Show Grokky", click: () => { void showTask(); } },
+    { type: "separator" },
+    { label: "Quit and stop local work", click: () => { explicitQuitRequested = true; app.quit(); } },
+  ]));
+  tray.on("click", () => { void showTask(); });
 }
 
 app.whenReady().then(async () => {
@@ -88,7 +112,9 @@ app.whenReady().then(async () => {
   const notifications = new NotificationService(controlRuntime, {
     show: async (record) => {
       if (!Notification.isSupported()) return false;
-      new Notification({ title: record.title, body: record.body }).show();
+      const notification = new Notification({ title: record.title, body: record.body });
+      if (record.taskId) notification.on("click", () => { void showTask(record.taskId); });
+      notification.show();
       return true;
     },
   });
@@ -393,26 +419,31 @@ app.whenReady().then(async () => {
             await mainWindow.webContents.executeJavaScript(`document.querySelector('.crew-picker-list > button:last-child')?.click()`);
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
-        } else if (smokeView === "task-graph") {
+        } else if (smokeView === "task-graph" || smokeView === "notification-deep-link") {
           const suffix = Date.now().toString(36);
+          const childTaskId = `smoke-child-${suffix}`;
           await controller.createTaskGoal({
             id: `smoke-goal-${suffix}`,
             title: "Ship durable orchestration",
             objective: "Verify the queue is readable and operable after restart",
             nodes: [
               { id: `smoke-root-${suffix}`, title: "Recover active leases", description: "Reconcile the last checkpoint", priority: 8, assignment: { harnessId: "smoke-fixture" } },
-              { id: `smoke-child-${suffix}`, title: "Notify the operator", description: "Wait for recovery to succeed", dependsOn: [`smoke-root-${suffix}`], priority: 5, assignment: { harnessId: "smoke-fixture" } },
+              { id: childTaskId, title: "Notify the operator", description: "Wait for recovery to succeed", dependsOn: [`smoke-root-${suffix}`], priority: 5, assignment: { harnessId: "smoke-fixture" } },
             ],
           });
-          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);
+          if (smokeView === "notification-deep-link") mainWindow.webContents.send(IPC.taskOpen, childTaskId);
+          else await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);
           await new Promise((resolve) => setTimeout(resolve, 250));
           const taskGraphReady = await mainWindow.webContents.executeJavaScript(`(() => {
             const graph = document.querySelector('[aria-label="Task graph and queue"]');
             const controls = document.querySelector('[aria-label="Live steering controls"]');
+            const notifiedTask = document.querySelector('[aria-label="Inspect Notify the operator"]');
             const first = graph?.querySelector('button.task-node-card');
             if (!(first instanceof HTMLButtonElement) || !(controls instanceof HTMLElement)) return false;
             first.focus();
-            return document.activeElement === first && graph?.querySelectorAll('[role="listitem"]').length === 2;
+            return document.activeElement === first
+              && graph?.querySelectorAll('[role="listitem"]').length === 2
+              && (${JSON.stringify(smokeView)} !== "notification-deep-link" || notifiedTask instanceof HTMLElement);
           })()`);
           if (!taskGraphReady) throw new Error("task graph smoke fixture was not keyboard-readable");
         } else if (smokeView === "agents" || smokeView === "agent-editor" || smokeView === "agent-select") {
@@ -825,13 +856,30 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  const work = mainController?.localBackgroundWork();
+  if (work && (work.conversationIds.length || work.taskIds.length)) ensureTray();
+  else if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", (event) => {
   if (!stateStore || databaseClosed) return;
   event.preventDefault();
   if (databaseClosing) return;
+  const work = mainController?.localBackgroundWork();
+  if (!explicitQuitRequested && work && (work.conversationIds.length || work.taskIds.length)) {
+    const count = work.conversationIds.length + work.taskIds.length;
+    const choice = dialog.showMessageBoxSync({
+      type: "warning",
+      title: "Stop local agent work?",
+      message: `${count} local ${count === 1 ? "run is" : "runs are"} still active.`,
+      detail: "Keep Grokky running in the tray, or checkpoint what can be recovered and stop the active local work before quitting.",
+      buttons: ["Keep Running", "Quit and Stop Work"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (choice === 0) { ensureTray(); return; }
+    explicitQuitRequested = true;
+  }
   databaseClosing = true;
   const shutdown = mainController ? mainController.shutdown() : Promise.resolve();
   void shutdown
@@ -839,6 +887,8 @@ app.on("before-quit", (event) => {
     .catch((error) => console.error("Failed to close the control-plane database", error))
     .finally(() => {
       databaseClosed = true;
+      tray?.destroy();
+      tray = null;
       app.quit();
     });
 });

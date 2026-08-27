@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppSnapshot } from "../../../../shared/contracts";
 import { TaskGraphView } from "./TaskGraphView";
 import { TaskInspector } from "./TaskInspector";
@@ -8,12 +8,16 @@ import { PolicyEditor } from "./PolicyEditor";
 import { BudgetMeter } from "./BudgetMeter";
 import { AttentionCenter } from "./AttentionCenter";
 
-export function TaskControlRoom({ snapshot, onError }: { snapshot: AppSnapshot; onError(error: string): void }) {
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(snapshot.taskGraph.tasks[0]?.id);
+export function TaskControlRoom({ snapshot, openTaskRequest, onError }: { snapshot: AppSnapshot; openTaskRequest?: { taskId: string; nonce: string }; onError(error: string): void }) {
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(openTaskRequest?.taskId ?? snapshot.taskGraph.tasks[0]?.id);
   const [title, setTitle] = useState("");
   const [objective, setObjective] = useState("");
   const [busy, setBusy] = useState(false);
   const selectedTask = snapshot.taskGraph.tasks.find((task) => task.id === selectedTaskId) ?? snapshot.taskGraph.tasks[0];
+
+  useEffect(() => {
+    if (openTaskRequest && snapshot.taskGraph.tasks.some((task) => task.id === openTaskRequest.taskId)) setSelectedTaskId(openTaskRequest.taskId);
+  }, [openTaskRequest?.nonce]);
 
   async function createGoal() {
     if (!title.trim() || !objective.trim()) return;

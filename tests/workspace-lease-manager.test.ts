@@ -49,4 +49,19 @@ describe("workspace lease manager", () => {
     const reader = await manager.acquire({ taskId: "task-read", workspace, holderId: "reader", mode: "read" });
     expect(reader.writable).toBe(false);
   });
+
+  test("reuses a clean completed task worktree for its next attempt", async () => {
+    const repository = await createRepository(directories);
+    const leaseRoot = await mkdtemp(join(tmpdir(), "grokky-leases-"));
+    directories.push(leaseRoot);
+    const manager = new WorkspaceLeaseManager(new MemoryWorkspaceStore(), leaseRoot);
+    await manager.initialize();
+
+    const first = await manager.acquire({ taskId: "task-resume", workspace: repository, holderId: "attempt-1", mode: "write" });
+    await manager.complete(first.id);
+    const resumed = await manager.acquire({ taskId: "task-resume", workspace: repository, holderId: "attempt-2", mode: "write" });
+
+    expect(resumed).toMatchObject({ id: first.id, root: first.root, branch: first.branch, holderId: "attempt-2", status: "active" });
+    expect(manager.snapshot().leases).toHaveLength(1);
+  });
 });

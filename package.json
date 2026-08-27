@@ -81,6 +81,7 @@
     },
     "files": [
       "out/**/*",
+      "build/icon-mascot.png",
       "package.json"
     ],
     "asar": true,

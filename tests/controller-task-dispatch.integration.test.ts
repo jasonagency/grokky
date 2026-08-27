@@ -28,6 +28,36 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<voi
 }
 
 describe("controller task dispatch", () => {
+  test("waits for the next harness boundary to pause but stops immediately", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "grokky-task-pause-"));
+    const database = new DirectDatabaseClient(join(directory, "control.sqlite3")); await database.initialize();
+    let releaseBoundary!: () => void;
+    const boundary = new Promise<void>((resolve) => { releaseBoundary = resolve; });
+    let entered = false;
+    const adapter = new CodexSdkAdapter(async (run) => {
+      entered = true;
+      await boundary;
+      await run.onEvent({ type: "activity", activity: { id: "boundary", kind: "notice", label: "Safe boundary", status: "completed", createdAt: Date.now() } });
+      await run.onEvent({ type: "final", text: "Should not complete" });
+    });
+    adapter.health = async () => ({ ready: true, label: "Ready", source: "test", detail: "Ready" });
+    const store = new StateStore(join(directory, "state.json"), directory);
+    const controller = new MainController(store, directory, "test", undefined, new ControlPlaneService(database), new HarnessRegistry([adapter]), new TaskScheduler(database, { concurrency: 1, leaseDurationMs: 30_000 }), new WorkspaceLeaseManager(database, join(directory, "worktrees")), undefined, new SteeringService(database));
+    try {
+      await controller.initialize();
+      await controller.createTaskGoal({ id: "pause-goal", title: "Pause", objective: "Pause safely", nodes: [{ id: "pause-task", title: "Pause task", assignment: { harnessId: "codex-sdk", workspaceMode: "read" } }] });
+      await waitFor(() => entered && controller.snapshot().taskGraph.tasks[0]?.status === "running");
+
+      await controller.controlTask("pause-task", { type: "pause", idempotencyKey: "pause-at-boundary" });
+      expect(controller.snapshot().taskGraph.tasks[0]?.status).toBe("running");
+      expect(controller.snapshot().controlRuntime?.commands[0]).toMatchObject({ status: "acknowledged", detail: expect.stringContaining("safe boundary") });
+
+      releaseBoundary();
+      await waitFor(() => controller.snapshot().taskGraph.tasks[0]?.status === "paused");
+      expect(controller.snapshot().taskGraph.tasks[0]?.attempts[0]).toMatchObject({ status: "canceled" });
+    } finally { releaseBoundary(); await controller.shutdown(); await store.close(); await database.close(); }
+  });
+
   test("reconciles a host-owned routine that fired while the desktop was closed", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-remote-routine-"));
     const remoteRoot = await mkdtemp(join(tmpdir(), "grokky-routine-host-"));

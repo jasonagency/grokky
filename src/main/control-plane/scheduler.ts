@@ -24,7 +24,7 @@ export type TaskExecutor = (claim: TaskLeaseClaim) => Promise<Omit<TaskOutcome, 
 
 export interface TaskDispatchResult {
   taskId: string;
-  status: "succeeded" | "failed" | "detached";
+  status: "succeeded" | "failed" | "detached" | "paused";
   error?: string;
 }
 
@@ -32,6 +32,13 @@ export class TaskExecutionDetachedError extends Error {
   constructor() {
     super("Remote task monitor detached while host ownership remains active");
     this.name = "TaskExecutionDetachedError";
+  }
+}
+
+export class TaskExecutionPausedError extends Error {
+  constructor() {
+    super("Task paused at a safe execution boundary");
+    this.name = "TaskExecutionPausedError";
   }
 }
 
@@ -141,6 +148,7 @@ export class TaskScheduler {
         return { taskId: claim.task.id, status: "succeeded" };
       } catch (error) {
         if (error instanceof TaskExecutionDetachedError) return { taskId: claim.task.id, status: "detached" };
+        if (error instanceof TaskExecutionPausedError) return { taskId: claim.task.id, status: "paused" };
         const detail = error instanceof Error ? error.message : "Task executor failed";
         try {
           await this.fail(claim.task.id, claim.lease.id, detail);

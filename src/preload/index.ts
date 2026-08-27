@@ -6,6 +6,13 @@ import { userFacingError } from "../shared/errors";
 
 let snapshotListener: ((_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) => void) | undefined;
 let projectionListener: ((_event: Electron.IpcRendererEvent, change: ProjectionChange) => void) | undefined;
+let openTaskCallback: ((taskId: string) => void) | undefined;
+let queuedTaskId: string | undefined;
+
+ipcRenderer.on(IPC.taskOpen, (_event, taskId: string) => {
+  if (openTaskCallback) openTaskCallback(taskId);
+  else queuedTaskId = taskId;
+});
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   try {
@@ -84,6 +91,14 @@ const api: GrokkyApi = {
     if (projectionListener) ipcRenderer.removeListener(IPC.projectionChanged, projectionListener);
     projectionListener = (_event: Electron.IpcRendererEvent, change: ProjectionChange) => listener(change);
     ipcRenderer.on(IPC.projectionChanged, projectionListener);
+  },
+  onOpenTask: (listener: (taskId: string) => void) => {
+    openTaskCallback = listener;
+    if (queuedTaskId) {
+      const taskId = queuedTaskId;
+      queuedTaskId = undefined;
+      queueMicrotask(() => openTaskCallback?.(taskId));
+    }
   },
 };
 

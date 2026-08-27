@@ -7,7 +7,7 @@ import { executeWorkspaceTool, type WorkspaceToolName } from "../main/workspace-
 import type { RemoteJobRecord } from "../shared/remote-protocol";
 import { HostHarnessRegistry } from "./host-harness-registry";
 import type { ScreenSessionManager } from "./screen-session-manager";
-import type { ScreenKind, ScreenLease } from "../shared/remote-protocol";
+import type { ScreenAuditEntry, ScreenKind, ScreenLease } from "../shared/remote-protocol";
 import { CapabilitiesService } from "../main/capabilities";
 import { McpAuthManager } from "../main/tools/mcp-auth";
 import { McpClientManager } from "../main/tools/mcp-client-manager";
@@ -107,9 +107,19 @@ export async function createHostHarnessRegistry(options: HostHarnessRegistryOpti
       let finalText = "";
       let costUsd = 0;
       let screenLease: ScreenLease | undefined;
+      let unsubscribeScreenAudit: (() => void) | undefined;
+      let screenAuditQueue: Promise<void> = Promise.resolve();
+      const emitScreenAudit = (audit: ScreenAuditEntry) => hostContext.emit("job.output", { event: { type: "activity", activity: { id: audit.id, kind: "tool", label: `Screen ${audit.action}`, detail: audit.detail, status: audit.status, createdAt: audit.createdAt } } satisfies ProviderEvent });
       const leaseScreen = async () => {
         if (!options.screens) throw new Error("Remote host screen sessions are not provisioned");
-        screenLease ??= await options.screens.lease(payload.agents?.[0]?.id ?? `remote:${job.id}`, payload.screenKind ?? "browser");
+        if (!screenLease) {
+          screenLease = await options.screens.lease(payload.agents?.[0]?.id ?? `remote:${job.id}`, payload.screenKind ?? "browser");
+          const leaseAudit = options.screens.snapshot().audit.findLast((audit) => audit.leaseId === screenLease!.id && audit.action === "lease");
+          if (leaseAudit) await emitScreenAudit(leaseAudit);
+          unsubscribeScreenAudit = options.screens.subscribe((audit) => {
+            if (audit.leaseId === screenLease?.id) screenAuditQueue = screenAuditQueue.then(() => emitScreenAudit(audit));
+          });
+        }
         return screenLease;
       };
       const emit = async (event: ProviderEvent): Promise<void> => {
@@ -167,6 +177,8 @@ export async function createHostHarnessRegistry(options: HostHarnessRegistryOpti
         return finalText || `Remote harness ${harnessId} completed`;
       } finally {
         if (screenLease) await options.screens?.revoke(screenLease.id, screenLease.epoch).catch(() => undefined);
+        unsubscribeScreenAudit?.();
+        await screenAuditQueue;
       }
     });
   }

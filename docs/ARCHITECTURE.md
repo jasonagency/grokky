@@ -98,6 +98,8 @@ The main process is authoritative. React does not optimistically own durable con
 
 Run history now also flows through stable, append-only control-plane events. Each aggregate has a monotonic sequence; duplicate event IDs are idempotent, and sequence gaps are quarantined as diagnostics. The storage worker commits an event, its conversation projection, and any content-addressed artifact in one transaction. On restart, the projector can rebuild its bounded active-run view from events and referenced artifacts alone. The renderer receives sanitized projection changes over a dedicated IPC channel and retains full snapshot retrieval for startup and gap recovery.
 
+Live task commands are persisted before delivery. Stop aborts and fences an active attempt immediately; pause remains queued until the next model, tool, MCP, or terminal-event boundary, checkpoints a writable task branch when possible, and then fences the attempt as paused. A resumed attempt reuses its clean completed task worktree so the checkpoint remains in its execution context. Closing the last window keeps locally owned queued or running work alive in the tray. A full quit with active local work requires an explicit stop choice. Remote host-owned work does not keep the desktop process alive. OS notification clicks restore the window and open the owning task through the typed preload bridge.
+
 ```mermaid
 stateDiagram-v2
   [*] --> Idle

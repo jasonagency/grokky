@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { TaskScheduler, type TaskGraphStore } from "../src/main/control-plane/scheduler";
+import { TaskExecutionPausedError, TaskScheduler, type TaskGraphStore } from "../src/main/control-plane/scheduler";
 
 class MemoryTaskStore implements TaskGraphStore {
   value: string | null = null;
@@ -130,6 +130,20 @@ describe("task scheduler", () => {
 
     expect(setup.scheduler.snapshot().tasks[0]).toMatchObject({ status: "paused", lease: undefined });
     await expect(setup.scheduler.complete(claim!.task.id, claim!.lease.id, { summary: "Stale result" })).rejects.toThrow("stale");
+  });
+
+  test("reports a safe-boundary pause without converting it into a task failure", async () => {
+    const setup = scheduler(undefined, 1);
+    await setup.scheduler.initialize();
+    await setup.scheduler.createGoal({ id: "goal-pause", title: "Pause", objective: "Pause safely", nodes: [{ id: "pause-me", title: "Pause me" }] });
+
+    const results = await setup.scheduler.dispatchReady(async (claim) => {
+      await setup.scheduler.interrupt(claim.task.id, claim.lease.id, "paused");
+      throw new TaskExecutionPausedError();
+    });
+
+    expect(results).toEqual([{ taskId: "pause-me", status: "paused" }]);
+    expect(setup.scheduler.snapshot().tasks[0]).toMatchObject({ status: "paused", outcome: undefined });
   });
 
   test("reconciles live lease expiry before claiming capacity and fences stale completion", async () => {

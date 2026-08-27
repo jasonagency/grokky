@@ -15,9 +15,11 @@ export class ScreenSessionManager {
   private sequences = new Map<string, number>();
   private history: AgentScreenSnapshot["history"] = [];
   private readonly providers = new Map<ScreenKind, ScreenProvider>();
-  constructor(providers: ScreenProvider[] = [], private readonly now = Date.now, private readonly leaseMs = 5 * 60_000, private readonly onAudit?: (entry: ScreenAuditEntry) => void) { for (const provider of providers) this.providers.set(provider.kind, provider); }
+  private readonly auditListeners = new Set<(entry: ScreenAuditEntry) => void>();
+  constructor(providers: ScreenProvider[] = [], private readonly now = Date.now, private readonly leaseMs = 5 * 60_000, onAudit?: (entry: ScreenAuditEntry) => void) { for (const provider of providers) this.providers.set(provider.kind, provider); if (onAudit) this.auditListeners.add(onAudit); }
   kinds(): ScreenKind[] { return [...this.providers.keys()].sort(); }
   snapshot(): AgentScreenSnapshot { this.expire(); return structuredClone({ leases: this.leases, audit: this.audit.slice(-500), history: this.history.slice(-100) }); }
+  subscribe(listener: (entry: ScreenAuditEntry) => void): () => void { this.auditListeners.add(listener); return () => this.auditListeners.delete(listener); }
 
   async lease(agentId: string, kind: ScreenKind): Promise<ScreenLease> {
     this.expire();
@@ -55,5 +57,5 @@ export class ScreenSessionManager {
   private expire(): void { const now = this.now(); for (const lease of this.leases) if ((lease.status === "active" || lease.status === "paused") && lease.expiresAt <= now) { lease.status = "expired"; lease.controller = "locked"; lease.epoch += 1; void this.providers.get(lease.kind)?.close(lease.providerSessionId).catch(() => undefined); this.record(lease, "failure", "failed", "Screen lease expired"); } }
   private boundInput(input: ScreenInput): ScreenInput { const value = structuredClone(input); if (value.type === "click" && (!Number.isFinite(value.x) || !Number.isFinite(value.y) || value.x! < 0 || value.y! < 0 || value.x! > 20_000 || value.y! > 20_000)) throw new Error("Screen click coordinates are invalid"); if (value.type === "key" && (!value.key || value.key.length > 80)) throw new Error("Screen key input is invalid"); return value; }
   private fail(lease: ScreenLease, detail: string): never { this.record(lease, "failure", "failed", detail); throw new Error(detail); }
-  private record(lease: ScreenLease, action: ScreenAuditEntry["action"], status: ScreenAuditEntry["status"], detail: string): void { const entry = { id: `screen-audit:${randomUUID()}`, leaseId: lease.id, agentId: lease.agentId, action, status, detail, createdAt: this.now() } satisfies ScreenAuditEntry; this.audit.push(entry); this.onAudit?.(structuredClone(entry)); }
+  private record(lease: ScreenLease, action: ScreenAuditEntry["action"], status: ScreenAuditEntry["status"], detail: string): void { const entry = { id: `screen-audit:${randomUUID()}`, leaseId: lease.id, agentId: lease.agentId, action, status, detail, createdAt: this.now() } satisfies ScreenAuditEntry; this.audit.push(entry); for (const listener of this.auditListeners) listener(structuredClone(entry)); }
 }

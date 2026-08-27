@@ -12,6 +12,7 @@ import { HostStore } from "../src/runner/host-store";
 import { HarnessRegistry } from "../src/main/harnesses/registry";
 import type { HarnessAdapter } from "../src/main/harnesses/types";
 import { resolve } from "node:path";
+import { ScreenSessionManager, type ScreenProvider } from "../src/runner/screen-session-manager";
 
 function transport(host: AgentHost): HostTransport { return { capabilities: async () => host.capabilities(), submit: (credential, request) => host.submit(credential, request), events: async (credential, cursor, limit) => host.events(credential, cursor, limit), control: (credential, command) => host.control(credential, command) }; }
 async function eventually(check: () => boolean): Promise<void> { for (let index = 0; index < 100; index += 1) { if (check()) return; await new Promise((resolve) => setTimeout(resolve, 2)); } throw new Error("condition not reached"); }
@@ -27,20 +28,25 @@ describe("offline remote host", () => {
       health: async () => ({ ready: true, label: "Ready", source: "test", detail: "Ready" }),
       run: async (context) => {
         await context.executeTool("create_file", { path: "remote-result.txt", content: context.prompt });
+        await context.executeTool("capture_screen", {});
+        await context.executeTool("click_screen", { x: 4, y: 8 });
         await context.onEvent({ type: "thread", threadId: "remote-session" });
         await context.onEvent({ type: "final", text: "remote adapter finished" });
       },
       deliverControl: async () => ({ accepted: true }),
       cleanup: async () => undefined,
     };
+    const provider: ScreenProvider = { kind: "browser", create: async () => ({ sessionId: "remote-page", delivery: "snapshot" }), capture: async () => ({ mediaType: "image/png", data: "screen-frame" }), input: async () => undefined, close: async () => undefined };
+    const screens = new ScreenSessionManager([provider]);
     const registry = await createHostHarnessRegistry({
       homeDirectory: directory,
       root: directory,
       harnessRegistry: new HarnessRegistry([adapter]),
       allowWrite: true,
       allowCommands: false,
+      screens,
     });
-    const host = new AgentHost("host", new HostStore(), registry, "secret", () => 10); await host.initialize();
+    const host = new AgentHost("host", new HostStore(), registry, "secret", () => 10, screens); await host.initialize();
 
     await host.submit("secret", {
       id: "job", idempotencyKey: "job-once", taskId: "task", attemptId: "attempt", leaseEpoch: 1,
@@ -52,6 +58,7 @@ describe("offline remote host", () => {
     expect(await readFile(join(directory, "remote-result.txt"), "utf8")).toBe("written by the remote harness");
     expect(host.snapshot().events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "job.output", payload: expect.objectContaining({ event: expect.objectContaining({ type: "thread", threadId: "remote-session" }) }) }),
+      expect.objectContaining({ type: "job.output", payload: expect.objectContaining({ event: expect.objectContaining({ type: "activity", activity: expect.objectContaining({ label: "Screen screenshot", detail: "Captured frame 1" }) }) }) }),
       expect.objectContaining({ type: "job.completed", payload: { output: "remote adapter finished" } }),
     ]));
   });

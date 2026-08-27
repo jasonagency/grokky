@@ -92,6 +92,8 @@ Grokky keeps them visible and independently configurable. A conversation records
 | Projects | Search recent folders, choose or create a project from the composer, or use an isolated no-project scratch folder |
 | Access | Switch each conversation between Read only, Workspace access, and Full access for local development commands |
 | Live activity | Render reasoning, plans, files, commands, tools, errors, and usage as normalized events |
+| Task control | Persist redirects, follow-ups, safe-boundary pauses, immediate stops, routing decisions, budgets, and notification outcomes |
+| Background work | Keep local queued or running work alive from the tray; full quit explicitly checkpoints recoverable state and stops local attempts |
 | Multi-agent | Run native Codex child threads or parallel OpenRouter specialists with a final lead |
 | Agents | Create personal or project TOML agents with unique mascot colors, models, reasoning, and access |
 | Skills | Discover and enable Codex skills from project, personal, system, and plugin roots |

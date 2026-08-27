@@ -39,6 +39,20 @@ export class WorkspaceLeaseManager {
       const now = this.now();
       let lease: WorkspaceLease;
       if (repository && request.mode === "write") {
+        const resumable = this.value.leases.findLast((item) => item.taskId === request.taskId
+          && item.repositoryId === repository.id
+          && item.kind === "git"
+          && item.writable
+          && item.status === "completed");
+        if (resumable) {
+          const resumedRepository = await GitRepository.open(resumable.root);
+          if (await resumedRepository.status(resumable.root)) throw new Error("The prior task worktree is dirty and requires recovery before it can resume");
+          resumable.holderId = request.holderId;
+          resumable.status = "active";
+          resumable.updatedAt = now;
+          await this.commit();
+          return clone(resumable);
+        }
         const baseCommit = await repository.head();
         const worktree = await this.worktrees.create(repository, request.taskId, baseCommit);
         lease = { id: `workspace:${randomUUID()}`, taskId: request.taskId, repositoryId: repository.id, kind: "git", mode: "write", writable: true, workspace: repository.root, root: worktree.path, holderId: request.holderId, status: "active", branch: worktree.branch, baseCommit, createdAt: now, updatedAt: now };
