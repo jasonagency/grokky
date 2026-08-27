@@ -15,6 +15,7 @@ import type { WorkspaceLease } from "../shared/control-plane-contracts";
 import type { PersistedComputerAccess, PersistedRemoteDevice } from "./state-store";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
 import { assertCompatibleProtocol, assertSecureRemoteEndpoint } from "../shared/remote-protocol";
+import type { ScreenSessionManager } from "../runner/screen-session-manager";
 
 export type ComputerToolName = WorkspaceToolName | "browse_url" | "capture_screen" | "open_application" | "click_screen" | "type_text";
 
@@ -173,10 +174,12 @@ async function probeReadableRoot(root: string): Promise<string> {
 export class ComputerAccessService {
   private readonly host: ComputerHostAdapter;
   private readonly secrets: ComputerAccessSecrets;
+  private readonly screens?: ScreenSessionManager;
 
-  constructor(options: { host?: ComputerHostAdapter; secrets?: ComputerAccessSecrets } = {}) {
+  constructor(options: { host?: ComputerHostAdapter; secrets?: ComputerAccessSecrets; screens?: ScreenSessionManager } = {}) {
     this.host = options.host ?? defaultHostAdapter();
     this.secrets = options.secrets ?? defaultSecrets();
+    this.screens = options.screens;
   }
 
   snapshot(state: PersistedComputerAccess, root: string, pendingApproval?: ComputerAccessSnapshot["pendingApproval"]): ComputerAccessSnapshot {
@@ -220,6 +223,7 @@ export class ComputerAccessService {
       networkAllowlist: [...state.networkAllowlist],
       auditLog: [...state.auditLog].sort((left, right) => right.createdAt - left.createdAt).slice(0, 120),
       ...(pendingApproval ? { pendingApproval } : {}),
+      ...(this.screens ? { screens: this.screens.snapshot() } : {}),
     };
   }
 
@@ -345,6 +349,10 @@ export class ComputerAccessService {
     const b = Buffer.from(right);
     return a.length === b.length && timingSafeEqual(a, b);
   }
+
+  takeoverScreen(leaseId: string, epoch: number) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.takeover(leaseId, epoch); }
+  returnScreen(leaseId: string, epoch: number) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.returnControl(leaseId, epoch); }
+  lockScreen(leaseId: string, epoch: number) { if (!this.screens) throw new Error("Screen sessions are unavailable"); return this.screens.lock(leaseId, epoch); }
 
   private remoteDevice(state: PersistedComputerAccess): PersistedRemoteDevice {
     const device = state.remoteDevices.find((item) => item.id === state.activeDeviceId && !item.revoked);

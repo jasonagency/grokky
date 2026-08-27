@@ -1020,6 +1020,22 @@ summary:focus-visible,
 .routine-create { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; margin-top: 10px; }
 .routine-create input { min-width: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--field, var(--panel)); color: var(--text); padding: 7px; }
 @media (max-width: 900px) { .agent-workspace-grid { grid-template-columns: 1fr; } }
+.agent-computer-view > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.agent-computer-view > header span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.agent-computer-view > header h4 { margin: 3px 0; }
+.agent-computer-view > header p { max-width: 620px; margin: 4px 0 0; color: var(--muted); }
+.agent-computer-view > header > strong { border-radius: 999px; background: #a43f36; color: #fff; padding: 6px 9px; font-size: 9px; letter-spacing: .08em; white-space: nowrap; }
+.agent-screen-list { display: grid; gap: 8px; margin-top: 14px; }
+.agent-screen-list > article { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.agent-screen-list > p { color: var(--muted); }
+.screen-preview { display: grid; place-items: center; min-height: 58px; border: 1px solid var(--border); border-radius: 8px; background: #090d09; }
+.screen-preview i { color: var(--signal, #b7ff5f); font-size: 8px; font-style: normal; letter-spacing: .12em; }
+.screen-preview b { color: #d8ded5; font-size: 11px; }
+.agent-screen-list article > span:nth-child(2) strong, .agent-screen-list article > span:nth-child(2) small { display: block; }
+.agent-screen-list article > span:nth-child(2) small { color: var(--muted); }
+.takeover-controls { display: flex; gap: 6px; }
+.takeover-controls button { border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); padding: 6px 8px; }
+@media (max-width: 900px) { .agent-screen-list > article { grid-template-columns: 80px 1fr; } .takeover-controls { grid-column: 1 / -1; } }
 
 /* Work log and multi-agent orchestration */
 .activity-panel,

@@ -538,6 +538,10 @@ export class MainController {
     await this.commit();
   }
 
+  takeoverScreen(leaseId: string, epoch: number): void { this.computerAccess.takeoverScreen(leaseId, epoch); this.publishSnapshot(); }
+  returnScreen(leaseId: string, epoch: number): void { this.computerAccess.returnScreen(leaseId, epoch); this.publishSnapshot(); }
+  lockScreen(leaseId: string, epoch: number): void { this.computerAccess.lockScreen(leaseId, epoch); this.publishSnapshot(); }
+
   async resolveComputerApproval(approvalId: string, decision: ComputerApprovalDecision): Promise<void> {
     const index = this.pendingApprovals.findIndex((approval) => approval.id === approvalId);
     if (index < 0) throw new Error("Computer approval is no longer pending");

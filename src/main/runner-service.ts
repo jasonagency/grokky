@@ -8,6 +8,7 @@ import type { ComputerCapabilityId, SandboxMode } from "../shared/contracts";
 import { executeWorkspaceTool, type WorkspaceToolName } from "./workspace-tools";
 import { REMOTE_PROTOCOL } from "../shared/remote-protocol";
 import type { RemoteControlCommand, RemoteJobRequest } from "../shared/remote-protocol";
+import type { ScreenInput, ScreenKind } from "../shared/remote-protocol";
 import type { AgentHost } from "../runner/agent-host";
 
 interface RunnerDiskState {
@@ -161,6 +162,13 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
         send(response, 200, await agentHost.control(state.token, body.command as RemoteControlCommand));
         return;
       }
+      if (url.pathname === "/host/screens" && agentHost) { send(response, 200, { screens: agentHost.screenSnapshot(state.token) }); return; }
+      if (url.pathname === "/host/screens/lease" && agentHost) { send(response, 200, { lease: await agentHost.leaseScreen(state.token, String(body.agentId), body.kind as ScreenKind) }); return; }
+      if (url.pathname === "/host/screens/capture" && agentHost) { send(response, 200, { frame: await agentHost.captureScreen(state.token, String(body.leaseId), Number(body.epoch)) }); return; }
+      if (url.pathname === "/host/screens/input" && agentHost) { await agentHost.agentScreenInput(state.token, String(body.leaseId), Number(body.epoch), String(body.agentId), body.input as ScreenInput); send(response, 200, { ok: true }); return; }
+      if (url.pathname === "/host/screens/operator-input" && agentHost) { await agentHost.operatorScreenInput(state.token, String(body.leaseId), Number(body.epoch), body.input as ScreenInput); send(response, 200, { ok: true }); return; }
+      if (url.pathname === "/host/screens/control" && agentHost) { const leaseId = String(body.leaseId); const epoch = Number(body.epoch); const action = String(body.action); if (!new Set(["takeover", "return", "lock"]).has(action)) { send(response, 400, { error: "Screen control action is invalid" }); return; } const lease = action === "takeover" ? agentHost.takeoverScreen(state.token, leaseId, epoch) : action === "return" ? agentHost.returnScreen(state.token, leaseId, epoch) : agentHost.lockScreen(state.token, leaseId, epoch); send(response, 200, { lease }); return; }
+      if (url.pathname === "/host/screens/revoke" && agentHost) { await agentHost.revokeScreen(state.token, String(body.leaseId), Number(body.epoch)); send(response, 200, { ok: true }); return; }
       if (url.pathname === "/execute") {
         if (typeof body.name !== "string" || !toolNames.has(body.name as WorkspaceToolName)) {
           send(response, 400, { error: "Runner tool is unsupported" });

@@ -467,6 +467,8 @@ Add `--allow-write` only if the runner may accept workspace-write requests. Add 
 
 The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. It is proven through an in-process fault transport before a network deployment is enabled. Provider and MCP credentials remain on the host; the desktop retains only its revocable encrypted pairing credential.
 
+Agent computer sessions add independently addressed browser pages or non-root desktop sessions behind that same host protocol. Every screen and input event is bound to one lease. Browser pages may share logins that the operator approved, and all sessions share one user-scoped trust boundary. The interface deliberately does not describe them as sandboxes or tenant isolation. Human takeover pauses agent input and keeps password, passkey, two-factor, CAPTCHA, and payment-confirmation content out of model traces.
+
 ## Persistence and chat deletion
 
 Grokky stores state in Electron's per-user application-data directory. The primary database is:

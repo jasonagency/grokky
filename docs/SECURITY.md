@@ -205,6 +205,10 @@ Risk notes:
 
 Use Ask mode for Grokky-owned OpenRouter tools unless continuous automation is intentional. Review visible state before approving clicks or typing.
 
+Remote browser and desktop sessions use per-agent leases that bind screenshots, input, audit records, and lease epochs to one active agent. Separate browser pages can share an operator-approved persistent login context, so the sessions are coordination boundaries, not security isolation. All sessions run within one user-scoped host trust boundary.
+
+Operator takeover pauses model input before human action. Passwords, passkeys, two-factor codes, CAPTCHAs, and payment confirmations are human-only; their typed content is excluded from screen audit and trace payloads. Returning control is explicit. Stop input locks the lease. Expired, revoked, or reassigned epochs reject both screenshots and input. When low-latency streaming fails, the session marks snapshot fallback instead of silently pretending that live control remains available.
+
 ## Remote runner and agent host
 
 The compatibility runner is intentionally small. It has no provider credential and exposes only files plus optional commands. The agent-host layer adds durable model execution, so Codex, OpenRouter, Pi, and MCP credentials stay on that host and are never returned by pairing or event reconciliation.

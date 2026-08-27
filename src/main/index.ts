@@ -25,6 +25,7 @@ import { AgentRuntimeService, TeamRepository } from "./team/agent-runtime-servic
 import { MailboxService } from "./team/mailbox-service";
 import { MemoryService } from "./team/memory-service";
 import { RoutineService } from "./team/routine-service";
+import { ScreenSessionManager } from "../runner/screen-session-manager";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
@@ -93,6 +94,7 @@ app.whenReady().then(async () => {
   const electronSecrets = createElectronComputerSecrets();
   const controlPlane = new ControlPlaneService(database);
   const teamRepository = new TeamRepository(database);
+  const screenSessions = new ScreenSessionManager([], Date.now, 5 * 60_000, (audit) => { void controlPlane.record({ aggregateId: audit.leaseId, source: "screen-session", type: "screen.recorded", payload: { audit } }).catch(() => undefined); });
   const controller = new MainController(
     stateStore,
     homeDirectory,
@@ -100,6 +102,7 @@ app.whenReady().then(async () => {
     new ComputerAccessService({
       host: createElectronComputerHost(join(app.getPath("temp"), "grokky-captures")),
       secrets: electronSecrets,
+      screens: screenSessions,
     }),
     controlPlane,
     undefined,
@@ -157,6 +160,17 @@ app.whenReady().then(async () => {
           await new Promise((resolve) => setTimeout(resolve, 250));
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.agent-workspace')?.scrollIntoView({ block: 'start' })`);
           await new Promise((resolve) => setTimeout(resolve, 200));
+        } else if (smokeView === "agent-computer") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="computer"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const snapshot = controller.snapshot();
+          snapshot.computerAccess.screens = { audit: [], history: [], leases: [
+            { id: "screen-smoke-a", agentId: "researcher", providerSessionId: "page-a", kind: "browser", epoch: 3, controller: "agent", status: "active", delivery: "stream", sharedTrustBoundary: true, acquiredAt: Date.now() - 1_000, expiresAt: Date.now() + 60_000 },
+            { id: "screen-smoke-b", agentId: "builder", providerSessionId: "desktop-b", kind: "desktop", epoch: 1, controller: "operator", status: "active", delivery: "snapshot", sharedTrustBoundary: true, acquiredAt: Date.now() - 1_000, expiresAt: Date.now() + 60_000 },
+          ] };
+          mainWindow.webContents.send(IPC.snapshotChanged, snapshot);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('.agent-computer-view')?.scrollIntoView({ block: 'start' })`);
         } else if (smokeView === "session-delete-click") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.click()`);
           await new Promise((resolve) => setTimeout(resolve, 150));

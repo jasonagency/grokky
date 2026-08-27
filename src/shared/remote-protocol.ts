@@ -70,6 +70,26 @@ export interface RemoteReconciliationState {
   diagnostics: Array<{ cursor: number; jobId: string; detail: string }>;
 }
 
+export type ScreenKind = "browser" | "desktop";
+export type ScreenController = "agent" | "operator" | "locked";
+export interface ScreenLease {
+  id: string;
+  agentId: string;
+  providerSessionId: string;
+  kind: ScreenKind;
+  epoch: number;
+  controller: ScreenController;
+  status: "active" | "paused" | "revoked" | "expired";
+  delivery: "stream" | "snapshot";
+  sharedTrustBoundary: true;
+  acquiredAt: number;
+  expiresAt: number;
+}
+export interface ScreenSnapshotFrame { leaseId: string; epoch: number; sequence: number; mediaType: "image/png" | "image/jpeg"; data: string; capturedAt: number }
+export interface ScreenAuditEntry { id: string; leaseId: string; agentId: string; action: "lease" | "screenshot" | "agent-input" | "operator-takeover" | "operator-input" | "return-control" | "lock" | "revoke" | "failure"; status: "completed" | "failed"; detail: string; createdAt: number }
+export interface AgentScreenSnapshot { leases: ScreenLease[]; audit: ScreenAuditEntry[]; history: Array<Omit<ScreenSnapshotFrame, "data">> }
+export interface ScreenInput { type: "click" | "key" | "scroll"; x?: number; y?: number; key?: string; deltaY?: number; sensitivity?: "normal" | "password" | "passkey" | "two-factor" | "captcha" | "payment" }
+
 function unsigned(frame: Omit<RemoteEventFrame, "signature">): string { return JSON.stringify(frame); }
 
 export function signRemoteFrame(frame: Omit<RemoteEventFrame, "signature">, credential: string): RemoteEventFrame {

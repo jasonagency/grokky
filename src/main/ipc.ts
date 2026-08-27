@@ -142,6 +142,9 @@ export function registerIpc(controller: MainController): void {
     requireId(approvalId, "approval ID"),
     requireComputerApprovalDecision(decision),
   ));
+  ipcMain.handle(IPC.computerScreenTakeover, (_event, leaseId, epoch) => controller.takeoverScreen(requireId(leaseId, "screen lease ID"), Number(epoch)));
+  ipcMain.handle(IPC.computerScreenReturn, (_event, leaseId, epoch) => controller.returnScreen(requireId(leaseId, "screen lease ID"), Number(epoch)));
+  ipcMain.handle(IPC.computerScreenLock, (_event, leaseId, epoch) => controller.lockScreen(requireId(leaseId, "screen lease ID"), Number(epoch)));
   ipcMain.handle(IPC.taskGoalCreate, (_event, draft) => controller.createTaskGoal(validateTaskGoalDraft(draft)));
   ipcMain.handle(IPC.taskAction, (_event, taskId, action) => controller.actOnTask(
     validateTaskId(taskId),

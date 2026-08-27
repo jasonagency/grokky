@@ -1,5 +1,6 @@
 import type { ControlPolicyPatch, ControlRuntimeSnapshot, EvalComparisonResult, EvalMetricSet, EvalStateSnapshot, EvalVerificationRule, ProjectionChange, ReplayRequest, ReplayResult, TaskAction, TaskControlRequest, TaskGoalDraft, TaskGraphSnapshot, TraceBundle, TraceQuery, WorkspaceStateSnapshot } from "./control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
+import type { AgentScreenSnapshot } from "./remote-protocol";
 
 export type ProviderId = "codex" | "openrouter" | "pi";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
@@ -275,6 +276,7 @@ export interface ComputerAccessSnapshot {
   networkAllowlist: string[];
   auditLog: ComputerAuditEntry[];
   pendingApproval?: ComputerApprovalRequest;
+  screens?: AgentScreenSnapshot;
 }
 
 export interface SkillCapability {
@@ -393,6 +395,9 @@ export interface GrokkyApi {
   revokeComputer(deviceId: string): Promise<void>;
   updateComputerNetworkAllowlist(domains: string[]): Promise<void>;
   resolveComputerApproval(id: string, decision: ComputerApprovalDecision): Promise<void>;
+  takeoverScreen(leaseId: string, epoch: number): Promise<void>;
+  returnScreen(leaseId: string, epoch: number): Promise<void>;
+  lockScreen(leaseId: string, epoch: number): Promise<void>;
   createTaskGoal(draft: TaskGoalDraft): Promise<void>;
   actOnTask(taskId: string, action: TaskAction): Promise<void>;
   controlTask(taskId: string, control: TaskControlRequest): Promise<void>;
@@ -451,6 +456,9 @@ export const IPC = {
   computerRevoke: "grokky:computer:revoke",
   computerNetworkAllowlist: "grokky:computer:network-allowlist",
   computerApprovalResolve: "grokky:computer:approval-resolve",
+  computerScreenTakeover: "grokky:computer:screen-takeover",
+  computerScreenReturn: "grokky:computer:screen-return",
+  computerScreenLock: "grokky:computer:screen-lock",
   taskGoalCreate: "grokky:tasks:goal-create",
   taskAction: "grokky:tasks:action",
   taskControl: "grokky:tasks:control",

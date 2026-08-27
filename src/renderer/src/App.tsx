@@ -74,6 +74,8 @@ import { TraceExplorer } from "./features/traces/TraceExplorer";
 import { ReplayDialog } from "./features/traces/ReplayDialog";
 import { EvalDashboard } from "./features/evaluations/EvalDashboard";
 import { EvalComparison } from "./features/evaluations/EvalComparison";
+import { AgentComputerView } from "./features/computer/AgentComputerView";
+import type { ScreenLease } from "../../shared/remote-protocol";
 
 const OPENROUTER_SUGGESTIONS = [
   "openai/gpt-5.2",
@@ -1240,6 +1242,10 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     });
   }
 
+  async function screenAction(lease: ScreenLease, action: "takeover" | "return" | "lock") {
+    await computerAction(lease.id, () => action === "takeover" ? window.grokky.takeoverScreen(lease.id, lease.epoch) : action === "return" ? window.grokky.returnScreen(lease.id, lease.epoch) : window.grokky.lockScreen(lease.id, lease.epoch));
+  }
+
   function beginAgentDraft(template: AgentDraft, editingId: string | null = null) {
     setEditingAgentId(editingId);
     setAgentDraft({ ...template, icon: template.icon ?? botVariantForIdentity(template.name || "default") });
@@ -1496,6 +1502,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                   <div className="computer-section-heading"><div><h4>Browser allowlist</h4><p>Always-allowed browsing stays within these public domains. One domain per line.</p></div><button type="button" disabled={computerBusy === "network"} onClick={() => void computerAction("network", () => window.grokky.updateComputerNetworkAllowlist(networkDomains.split(/\n|,/).map((domain) => domain.trim()).filter(Boolean)))}>{computerBusy === "network" ? <InlineLoader label="Saving domains" quiet /> : <FloppyDisk size={13} />}Save</button></div>
                   <textarea value={networkDomains} onChange={(event) => setNetworkDomains(event.target.value)} placeholder={'github.com\ndevelopers.openai.com'} />
                 </section>
+
+                {snapshot.computerAccess.screens && <AgentComputerView screens={snapshot.computerAccess.screens} busy={computerBusy} onAction={(lease, action) => void screenAction(lease, action)} />}
 
                 <section className="computer-section audit-section">
                   <div className="computer-section-heading"><div><h4>Recent computer activity</h4><p>Every allowed and denied action is recorded locally.</p></div><ClockCounterClockwise size={17} /></div>

@@ -15,6 +15,7 @@ export type ControlPlaneEventType =
   | "approval.requested"
   | "approval.resolved"
   | "audit.recorded"
+  | "screen.recorded"
   | "run.final"
   | "run.completed"
   | "run.failed"

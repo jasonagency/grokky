@@ -4,6 +4,8 @@ import { MAX_REMOTE_FRAME_BYTES, REMOTE_PROTOCOL, signRemoteFrame } from "../sha
 import { HostHarnessRegistry } from "./host-harness-registry";
 import { HostScheduler } from "./host-scheduler";
 import type { HostStore } from "./host-store";
+import type { ScreenSessionManager } from "./screen-session-manager";
+import type { ScreenInput, ScreenKind } from "../shared/remote-protocol";
 
 function digest(value: string): Buffer { return createHash("sha256").update(value).digest(); }
 function validId(value: string): boolean { return /^[a-zA-Z0-9:_-]{1,180}$/.test(value); }
@@ -11,7 +13,7 @@ function validId(value: string): boolean { return /^[a-zA-Z0-9:_-]{1,180}$/.test
 export class AgentHost {
   private credentialHash?: Buffer;
   readonly scheduler: HostScheduler;
-  constructor(readonly hostId: string, private readonly store: HostStore, readonly registry: HostHarnessRegistry, credential: string, private readonly now = Date.now) {
+  constructor(readonly hostId: string, private readonly store: HostStore, readonly registry: HostHarnessRegistry, credential: string, private readonly now = Date.now, readonly screens?: ScreenSessionManager) {
     this.credentialHash = digest(credential);
     this.scheduler = new HostScheduler(store, registry, { emit: (job, type, payload) => this.append(job, type, payload, credential) }, now);
   }
@@ -61,6 +63,15 @@ export class AgentHost {
 
   revoke(): void { this.credentialHash = undefined; }
   snapshot() { return this.store.snapshot(); }
+  screenSnapshot(credential: string) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.snapshot(); }
+  leaseScreen(credential: string, agentId: string, kind: ScreenKind) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.lease(agentId, kind); }
+  captureScreen(credential: string, leaseId: string, epoch: number) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.capture(leaseId, epoch); }
+  agentScreenInput(credential: string, leaseId: string, epoch: number, agentId: string, input: ScreenInput) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.agentInput(leaseId, epoch, agentId, input); }
+  takeoverScreen(credential: string, leaseId: string, epoch: number) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.takeover(leaseId, epoch); }
+  operatorScreenInput(credential: string, leaseId: string, epoch: number, input: ScreenInput) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.operatorInput(leaseId, epoch, input); }
+  returnScreen(credential: string, leaseId: string, epoch: number) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.returnControl(leaseId, epoch); }
+  lockScreen(credential: string, leaseId: string, epoch: number) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.lock(leaseId, epoch); }
+  revokeScreen(credential: string, leaseId: string, epoch: number) { this.authorize(credential); if (!this.screens) throw new Error("Remote screen sessions are unavailable"); return this.screens.revoke(leaseId, epoch); }
 
   private authorize(credential: string): void { const supplied = digest(credential); if (!this.credentialHash || this.credentialHash.length !== supplied.length || !timingSafeEqual(this.credentialHash, supplied)) throw new Error("Remote host authorization failed"); }
   private validateRequest(request: RemoteJobRequest): void {
