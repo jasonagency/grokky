@@ -109,6 +109,20 @@ export class ControlPlaneService {
     return (this.sequences.get(aggregateId) ?? 0) + 1;
   }
 
+  async events(): Promise<ControlPlaneEvent[]> {
+    const records = (await this.database.listEvents()).map((value) => JSON.parse(value) as ControlPlaneEvent);
+    return Promise.all(records.map(async (storedEvent) => {
+      const sha256 = artifactSha256(storedEvent.payload);
+      if (!sha256) return storedEvent;
+      const content = await this.database.readEventArtifact(sha256);
+      return content ? { ...storedEvent, payload: JSON.parse(content) as unknown } : storedEvent;
+    }));
+  }
+
+  deleteExpiredArtifacts(now = Date.now()): Promise<number> {
+    return this.database.deleteExpiredEventArtifacts(now);
+  }
+
   append(event: ControlPlaneEvent): Promise<EventAppendResult> {
     return this.enqueue(() => this.appendInternal(event));
   }

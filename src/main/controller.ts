@@ -28,7 +28,7 @@ import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
 import { capabilityForTool, ComputerAccessService, newAuditId, targetForTool, type ComputerToolName } from "./computer-access";
 import type { ProviderEvent } from "./providers/types";
-import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, ControlPolicyPatch, IntegrationRecord, RouteDecision, TaskAction, TaskControlRequest, TaskGoalDraft, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
+import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, ControlPolicyPatch, EvalMetricSet, EvalVerificationRule, IntegrationRecord, ReplayRequest, RouteDecision, TaskAction, TaskControlRequest, TaskGoalDraft, TraceBundle, TraceQuery, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { LeaseReconciler } from "./control-plane/lease-reconciler";
@@ -49,6 +49,9 @@ import { McpAuthManager } from "./tools/mcp-auth";
 import { McpClientManager } from "./tools/mcp-client-manager";
 import { ToolGateway } from "./tools/tool-gateway";
 import type { HarnessMcpTool } from "./providers/types";
+import type { TraceService } from "./quality/trace-service";
+import type { ReplayService } from "./quality/replay-service";
+import type { EvalService } from "./quality/eval-service";
 
 function id(): string {
   return randomUUID().replaceAll("-", "");
@@ -110,6 +113,9 @@ export class MainController {
     private readonly steering?: SteeringService,
     private readonly notifications?: NotificationService,
     private readonly toolGateway: ToolGateway = new ToolGateway(new McpClientManager(new McpAuthManager())),
+    private readonly traces?: TraceService,
+    private readonly replays?: ReplayService,
+    private readonly evaluations?: EvalService,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -125,6 +131,8 @@ export class MainController {
     await this.workspaceLeases?.initialize();
     await this.steering?.initialize();
     await this.notifications?.initialize();
+    await this.evaluations?.initialize();
+    await this.traces?.applyRetention();
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
     if (!this.state.conversations.length) this.createConversationInternal();
     await this.refreshProviderStatuses(false);
@@ -209,6 +217,38 @@ export class MainController {
       if (patch.routingPolicy) value.routingPolicy = structuredClone(patch.routingPolicy);
     });
     this.publishSnapshot();
+  }
+
+  async queryTrace(query: TraceQuery): Promise<TraceBundle> {
+    if (!this.traces) throw new Error("Trace service is not available");
+    return this.traces.query(query);
+  }
+
+  async replayTrace(request: ReplayRequest) {
+    if (!this.replays) throw new Error("Replay service is not available");
+    return this.replays.replay(request);
+  }
+
+  getEvaluations() {
+    if (!this.evaluations) throw new Error("Evaluation service is not available");
+    return this.evaluations.snapshot();
+  }
+
+  async promoteEvaluation(input: { id: string; name: string; trace: TraceBundle; expectedOutcome: string; allowedSideEffects?: string[]; verificationRules: EvalVerificationRule[] }) {
+    if (!this.evaluations) throw new Error("Evaluation service is not available");
+    await this.evaluations.promote(input);
+    return this.evaluations.snapshot();
+  }
+
+  async gradeEvaluation(caseId: string, version: number, trace: TraceBundle, metrics: EvalMetricSet) {
+    if (!this.evaluations) throw new Error("Evaluation service is not available");
+    await this.evaluations.grade(caseId, version, trace, metrics);
+    return this.evaluations.snapshot();
+  }
+
+  compareEvaluations(baselineId: string, candidateId: string) {
+    if (!this.evaluations) throw new Error("Evaluation service is not available");
+    return this.evaluations.compare(baselineId, candidateId);
   }
 
   async routeTask(taskId: string): Promise<RouteDecision> {

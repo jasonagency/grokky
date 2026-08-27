@@ -137,6 +137,27 @@ export function registerIpc(controller: MainController): void {
     if (patch.budgetPolicy && (!Number.isFinite(patch.budgetPolicy.reserveFraction) || patch.budgetPolicy.reserveFraction < 0 || patch.budgetPolicy.reserveFraction > 1)) throw new Error("Invalid budget reserve");
     return controller.updateControlPolicies(patch);
   });
+  ipcMain.handle(IPC.traceQuery, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 8_000) throw new Error("Invalid trace query");
+    return controller.queryTrace(structuredClone(value));
+  });
+  ipcMain.handle(IPC.traceReplay, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 2_000_000) throw new Error("Invalid replay request");
+    return controller.replayTrace(structuredClone(value));
+  });
+  ipcMain.handle(IPC.evalGet, () => controller.getEvaluations());
+  ipcMain.handle(IPC.evalPromote, (_event, value) => {
+    if (!value || typeof value !== "object" || JSON.stringify(value).length > 2_000_000) throw new Error("Invalid evaluation case");
+    return controller.promoteEvaluation(structuredClone(value));
+  });
+  ipcMain.handle(IPC.evalGrade, (_event, caseId, version, trace, metrics) => {
+    if (typeof caseId !== "string" || caseId.length > 160 || !Number.isInteger(version)) throw new Error("Invalid evaluation run");
+    return controller.gradeEvaluation(caseId, version, structuredClone(trace), structuredClone(metrics));
+  });
+  ipcMain.handle(IPC.evalCompare, (_event, baselineId, candidateId) => {
+    if (typeof baselineId !== "string" || typeof candidateId !== "string") throw new Error("Invalid evaluation comparison");
+    return controller.compareEvaluations(baselineId, candidateId);
+  });
   ipcMain.handle(IPC.externalOpen, async (_event, value) => {
     if (typeof value !== "string") throw new Error("Invalid URL");
     const url = new URL(value);

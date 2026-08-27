@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "harnesses": ["codex", "codex-app-server", "openrouter", "pi"],
+  "failures": ["budget", "policy", "tool", "interrupted"],
+  "description": "A bounded manifest used to ensure trace fixtures cover every supported harness and terminal failure class."
+}

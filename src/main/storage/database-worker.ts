@@ -33,6 +33,11 @@ port.on("message", (request: DatabaseRequest) => {
     } else if (command.type === "write_control_runtime") {
       database.writeControlRuntime(command.snapshot);
       response = { id: request.id, ok: true };
+    } else if (command.type === "read_quality_state") {
+      response = { id: request.id, ok: true, value: database.readQualityState() };
+    } else if (command.type === "write_quality_state") {
+      database.writeQualityState(command.snapshot);
+      response = { id: request.id, ok: true };
     } else if (command.type === "import_legacy_snapshot") {
       response = { id: request.id, ok: true, value: database.importLegacySnapshot(command.snapshot, command.source, command.importedAt) };
     } else if (command.type === "append_event") {
@@ -45,6 +50,8 @@ port.on("message", (request: DatabaseRequest) => {
       response = { id: request.id, ok: true, value: database.listConversationProjections() };
     } else if (command.type === "read_event_artifact") {
       response = { id: request.id, ok: true, value: database.readEventArtifact(command.sha256) };
+    } else if (command.type === "delete_expired_event_artifacts") {
+      response = { id: request.id, ok: true, value: database.deleteExpiredEventArtifacts(command.now) };
     } else if (command.type === "inspect") response = { id: request.id, ok: true, value: database.inspect() };
     else {
       database.close();

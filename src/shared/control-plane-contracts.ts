@@ -49,6 +49,122 @@ export interface ControlPlaneEvent {
   payload: unknown;
 }
 
+export interface TraceQuery {
+  goalId?: string;
+  runId?: string;
+  taskId?: string;
+  attemptId?: string;
+  agentId?: string;
+  harnessId?: string;
+  tool?: string;
+  policyDecision?: string;
+  artifactSha256?: string;
+  from?: number;
+  to?: number;
+}
+
+export interface TraceRecord {
+  event: ControlPlaneEvent;
+  ordinal: number;
+  links: {
+    goalId?: string;
+    runId?: string;
+    taskId?: string;
+    attemptId?: string;
+    agentId?: string;
+    harnessId?: string;
+    tool?: string;
+    artifactSha256?: string;
+  };
+}
+
+export interface TraceBundle {
+  query: TraceQuery;
+  events: TraceRecord[];
+  generatedAt: number;
+}
+
+export type ReplayMode = "inspection" | "simulated" | "forked";
+
+export interface ReplayRequest {
+  mode: ReplayMode;
+  trace: TraceBundle;
+  fromOrdinal?: number;
+  disposableLease?: { id: string; disposable: boolean };
+  approvalGranted?: boolean;
+  budgetRemainingUsd?: number;
+}
+
+export interface ReplayResult {
+  mode: ReplayMode;
+  executed: boolean;
+  events: TraceRecord[];
+  substitutions: Array<{ ordinal: number; tool: string; result: unknown; substituted: true }>;
+  forkId?: string;
+}
+
+export type EvalVerificationRule =
+  | { type: "event-present"; eventType: ControlPlaneEventType }
+  | { type: "no-policy-violations" }
+  | { type: "max-cost-usd"; value: number }
+  | { type: "max-latency-ms"; value: number }
+  | { type: "artifact-hash"; sha256: string };
+
+export interface EvalCase {
+  id: string;
+  version: number;
+  name: string;
+  sourceTraceHash: string;
+  frozenTrace: TraceBundle;
+  expectedOutcome: string;
+  allowedSideEffects: string[];
+  verificationRules: EvalVerificationRule[];
+  createdAt: number;
+}
+
+export interface EvalMetricSet {
+  harnessId?: string;
+  model?: string;
+  promptHash?: string;
+  policyHash?: string;
+  costUsd: number;
+  latencyMs: number;
+  toolCount: number;
+  testsPassed?: boolean;
+  diffSize?: number;
+  policyViolations: number;
+}
+
+export interface EvalGraderResult {
+  rule: EvalVerificationRule;
+  passed: boolean;
+  evidence: string;
+}
+
+export interface EvalRun {
+  id: string;
+  caseId: string;
+  caseVersion: number;
+  traceHash: string;
+  metrics: EvalMetricSet;
+  graders: EvalGraderResult[];
+  passed: boolean;
+  createdAt: number;
+}
+
+export interface EvalStateSnapshot {
+  revision: number;
+  cases: EvalCase[];
+  runs: EvalRun[];
+}
+
+export interface EvalComparisonResult {
+  baseline: EvalRun;
+  candidate: EvalRun;
+  delta: Pick<EvalMetricSet, "costUsd" | "latencyMs" | "toolCount" | "policyViolations"> & { diffSize?: number };
+  deterministicRegression: boolean;
+}
+
 export interface EventDiagnostic {
   id: string;
   eventId: string;

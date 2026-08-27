@@ -277,6 +277,37 @@ const migrations: Migration[] = [{
       CREATE INDEX notification_outbox_task_order ON notification_outbox(task_id, created_at);
     `);
   },
+}, {
+  version: 6,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE quality_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE eval_cases (
+        id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (id, version)
+      ) STRICT;
+
+      CREATE TABLE eval_runs (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        case_version INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (case_id, case_version) REFERENCES eval_cases(id, version) ON DELETE RESTRICT
+      ) STRICT;
+
+      CREATE INDEX eval_runs_case_order ON eval_runs(case_id, case_version, created_at);
+    `);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {

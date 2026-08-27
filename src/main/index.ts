@@ -18,6 +18,9 @@ import { IPC } from "../shared/contracts";
 import { McpAuthManager } from "./tools/mcp-auth";
 import { McpClientManager } from "./tools/mcp-client-manager";
 import { ToolGateway } from "./tools/tool-gateway";
+import { TraceService } from "./quality/trace-service";
+import { ReplayService } from "./quality/replay-service";
+import { EvalService } from "./quality/eval-service";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
@@ -84,6 +87,7 @@ app.whenReady().then(async () => {
     },
   });
   const electronSecrets = createElectronComputerSecrets();
+  const controlPlane = new ControlPlaneService(database);
   const controller = new MainController(
     stateStore,
     homeDirectory,
@@ -92,7 +96,7 @@ app.whenReady().then(async () => {
       host: createElectronComputerHost(join(app.getPath("temp"), "grokky-captures")),
       secrets: electronSecrets,
     }),
-    new ControlPlaneService(database),
+    controlPlane,
     undefined,
     new TaskScheduler(database, { concurrency: 4, leaseDurationMs: 30_000 }),
     workspaceLeases,
@@ -100,6 +104,9 @@ app.whenReady().then(async () => {
     steering,
     notifications,
     new ToolGateway(new McpClientManager(new McpAuthManager(join(app.getPath("userData"), "mcp-auth.json"), electronSecrets))),
+    new TraceService(controlPlane),
+    new ReplayService(),
+    new EvalService(database),
   );
   mainController = controller;
   await controller.initialize();
@@ -131,6 +138,11 @@ app.whenReady().then(async () => {
           await mainWindow.webContents.executeJavaScript(`document.documentElement.dataset.theme = 'light'`);
         } else if (smokeView === "session-delete") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.focus()`);
+        } else if (smokeView === "trace-lab") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-view="quality"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 350));
         } else if (smokeView === "session-delete-click") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.click()`);
           await new Promise((resolve) => setTimeout(resolve, 150));

@@ -60,7 +60,7 @@ import type {
   SkillCapability,
   McpToolClassification,
 } from "../../shared/contracts";
-import type { ProjectionChange } from "../../shared/control-plane-contracts";
+import type { EvalComparisonResult, EvalStateSnapshot, ReplayMode, ReplayResult, TraceBundle, TraceQuery, ProjectionChange } from "../../shared/control-plane-contracts";
 import { CODEX_MODELS } from "../../shared/contracts";
 import { requiresDevelopmentCommands, requiresProjectDirectory } from "../../shared/run-preflight";
 import { botVariantAt, botVariantForIdentity, type BotVariant } from "./bot-identity";
@@ -69,6 +69,10 @@ import { activitiesForDisplay, type DisplayActivity } from "./activity-display";
 import { crewRunsForDisplay, crewRunStage, groupCrewCommunications } from "./crew-display";
 import { TaskControlRoom } from "./features/tasks/TaskControlRoom";
 import { McpToolPolicy } from "./features/team/McpToolPolicy";
+import { TraceExplorer } from "./features/traces/TraceExplorer";
+import { ReplayDialog } from "./features/traces/ReplayDialog";
+import { EvalDashboard } from "./features/evaluations/EvalDashboard";
+import { EvalComparison } from "./features/evaluations/EvalComparison";
 
 const OPENROUTER_SUGGESTIONS = [
   "openai/gpt-5.2",
@@ -136,7 +140,7 @@ const SIGNAL_PALETTES: Array<{ id: AccentPalette; label: string; detail: string 
 
 type BotMood = "idle" | "thinking" | "working" | "success" | "error";
 type BotSize = "micro" | "xs" | "sm" | "md" | "lg" | "hero";
-type SettingsTab = "session" | "computer" | "tasks" | "skills" | "agents" | "mcp" | "connectors";
+type SettingsTab = "session" | "computer" | "tasks" | "quality" | "skills" | "agents" | "mcp" | "connectors";
 
 const BOT_ASSETS: Record<BotVariant, string> = {
   lime: "./mascots/grokky-hero.png",
@@ -1071,6 +1075,66 @@ function permissionLabel(value: string): string {
   return value === "granted" ? "System permission granted" : "System permission denied";
 }
 
+function QualityLab({ onError }: { onError(error: string): void }) {
+  const [query, setQuery] = useState<TraceQuery>({});
+  const [trace, setTrace] = useState<TraceBundle>();
+  const [evaluations, setEvaluations] = useState<EvalStateSnapshot>();
+  const [comparison, setComparison] = useState<EvalComparisonResult>();
+  const [replayMode, setReplayMode] = useState<ReplayMode>("inspection");
+  const [replay, setReplay] = useState<ReplayResult>();
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void Promise.all([window.grokky.queryTrace({}), window.grokky.getEvaluations()])
+      .then(([nextTrace, nextEvaluations]) => { setTrace(nextTrace); setEvaluations(nextEvaluations); })
+      .catch((error) => onError(error instanceof Error ? error.message : "Quality evidence could not be loaded"));
+  }, [onError]);
+
+  async function refresh() {
+    setBusy(true);
+    try { setTrace(await window.grokky.queryTrace(query)); }
+    catch (error) { onError(error instanceof Error ? error.message : "Trace could not be loaded"); }
+    finally { setBusy(false); }
+  }
+
+  async function runReplay() {
+    if (!trace) return;
+    setBusy(true);
+    try { setReplay(await window.grokky.replayTrace({ mode: replayMode, trace })); }
+    catch (error) { onError(error instanceof Error ? error.message : "Replay failed"); }
+    finally { setBusy(false); }
+  }
+
+  async function promote() {
+    if (!trace?.events.length) return;
+    setBusy(true);
+    try {
+      setEvaluations(await window.grokky.promoteEvaluation({
+        id: `trace-${trace.events[0]!.event.aggregateId}`.slice(0, 160),
+        name: `Trace ${trace.events[0]!.event.aggregateId}`,
+        trace,
+        expectedOutcome: "Repeat the retained deterministic outcome",
+        allowedSideEffects: [],
+        verificationRules: [{ type: "event-present", eventType: trace.events.at(-1)!.event.type }, { type: "no-policy-violations" }],
+      }));
+    } catch (error) { onError(error instanceof Error ? error.message : "Evaluation case could not be created"); }
+    finally { setBusy(false); }
+  }
+
+  async function compare(baselineId: string, candidateId: string) {
+    try { setComparison(await window.grokky.compareEvaluations(baselineId, candidateId)); }
+    catch (error) { onError(error instanceof Error ? error.message : "Evaluation runs could not be compared"); }
+  }
+
+  return <div className="settings-stack quality-lab">
+    <div className="settings-intro"><h3>Trace, replay, and evaluation</h3><p>Inspect exact evidence, replay without accidental side effects, and turn successful runs into regression suites.</p></div>
+    <TraceExplorer trace={trace} query={query} busy={busy} onQuery={setQuery} onRefresh={() => void refresh()} onPromote={() => void promote()} />
+    <ReplayDialog mode={replayMode} busy={busy} result={replay} onMode={setReplayMode} onRun={() => void runReplay()} />
+    <EvalDashboard state={evaluations} onCompare={(baselineId, candidateId) => void compare(baselineId, candidateId)} />
+    <EvalComparison comparison={comparison} />
+  </div>;
+}
+
 function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsChange, onClose, onError }: {
   snapshot: AppSnapshot;
   conversation: Conversation;
@@ -1230,6 +1294,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     { id: "session", label: "Session", icon: SlidersHorizontal },
     { id: "computer", label: "Computer access", icon: DesktopTower },
     { id: "tasks", label: "Task graph", icon: ClockCounterClockwise },
+    { id: "quality", label: "Trace lab", icon: FileText },
     { id: "agents", label: "Agents", icon: UsersThree },
     { id: "skills", label: "Skills", icon: PuzzlePiece },
     { id: "mcp", label: "MCP servers", icon: PlugsConnected },
@@ -1237,8 +1302,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   ];
   const navGroups: Array<{ label: string; items: typeof navItems }> = [
     { label: "Workspace", items: navItems.slice(0, 2) },
-    { label: "Orchestration", items: navItems.slice(2, 5) },
-    { label: "Extensions", items: navItems.slice(5) },
+    { label: "Orchestration", items: navItems.slice(2, 6) },
+    { label: "Extensions", items: navItems.slice(6) },
   ];
   const activeHarness = snapshot.harnesses.find((harness) => harness.id === conversation.harnessId)
     ?? snapshot.harnesses.find((harness) => harness.providerCompatibility.includes(conversation.provider));
@@ -1418,6 +1483,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                 </section>
               </div>
             )}
+
+            {tab === "quality" && <QualityLab onError={onError} />}
 
             {tab === "tasks" && <TaskControlRoom snapshot={snapshot} onError={onError} />}
 

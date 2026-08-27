@@ -1,4 +1,4 @@
-import type { ControlPolicyPatch, ControlRuntimeSnapshot, ProjectionChange, TaskAction, TaskControlRequest, TaskGoalDraft, TaskGraphSnapshot, WorkspaceStateSnapshot } from "./control-plane-contracts";
+import type { ControlPolicyPatch, ControlRuntimeSnapshot, EvalComparisonResult, EvalMetricSet, EvalStateSnapshot, EvalVerificationRule, ProjectionChange, ReplayRequest, ReplayResult, TaskAction, TaskControlRequest, TaskGoalDraft, TaskGraphSnapshot, TraceBundle, TraceQuery, WorkspaceStateSnapshot } from "./control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
 
 export type ProviderId = "codex" | "openrouter" | "pi";
@@ -323,6 +323,12 @@ export interface GrokkyApi {
   actOnTask(taskId: string, action: TaskAction): Promise<void>;
   controlTask(taskId: string, control: TaskControlRequest): Promise<void>;
   updateControlPolicies(patch: ControlPolicyPatch): Promise<void>;
+  queryTrace(query: TraceQuery): Promise<TraceBundle>;
+  replayTrace(request: ReplayRequest): Promise<ReplayResult>;
+  getEvaluations(): Promise<EvalStateSnapshot>;
+  promoteEvaluation(input: { id: string; name: string; trace: TraceBundle; expectedOutcome: string; allowedSideEffects?: string[]; verificationRules: EvalVerificationRule[] }): Promise<EvalStateSnapshot>;
+  gradeEvaluation(caseId: string, version: number, trace: TraceBundle, metrics: EvalMetricSet): Promise<EvalStateSnapshot>;
+  compareEvaluations(baselineId: string, candidateId: string): Promise<EvalComparisonResult>;
   openExternal(url: string): Promise<void>;
   onSnapshot(listener: (snapshot: AppSnapshot) => void): void;
   onProjection(listener: (change: ProjectionChange) => void): void;
@@ -368,6 +374,12 @@ export const IPC = {
   taskAction: "grokky:tasks:action",
   taskControl: "grokky:tasks:control",
   controlPoliciesUpdate: "grokky:control:policies-update",
+  traceQuery: "grokky:quality:trace-query",
+  traceReplay: "grokky:quality:trace-replay",
+  evalGet: "grokky:quality:eval-get",
+  evalPromote: "grokky:quality:eval-promote",
+  evalGrade: "grokky:quality:eval-grade",
+  evalCompare: "grokky:quality:eval-compare",
   externalOpen: "grokky:external:open",
 } as const;
 

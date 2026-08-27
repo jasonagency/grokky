@@ -53,6 +53,12 @@ const api: GrokkyApi = {
   actOnTask: (taskId, action) => invoke(IPC.taskAction, taskId, action),
   controlTask: (taskId, control) => invoke(IPC.taskControl, taskId, control),
   updateControlPolicies: (patch) => invoke(IPC.controlPoliciesUpdate, patch),
+  queryTrace: (query) => invoke(IPC.traceQuery, query),
+  replayTrace: (request) => invoke(IPC.traceReplay, request),
+  getEvaluations: () => invoke(IPC.evalGet),
+  promoteEvaluation: (input) => invoke(IPC.evalPromote, input),
+  gradeEvaluation: (caseId, version, trace, metrics) => invoke(IPC.evalGrade, caseId, version, trace, metrics),
+  compareEvaluations: (baselineId, candidateId) => invoke(IPC.evalCompare, baselineId, candidateId),
   openExternal: (url) => invoke(IPC.externalOpen, url),
   onSnapshot: (listener: (snapshot: AppSnapshot) => void) => {
     if (snapshotListener) ipcRenderer.removeListener(IPC.snapshotChanged, snapshotListener);

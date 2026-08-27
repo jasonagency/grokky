@@ -129,6 +129,27 @@ export class StorageDatabase {
     });
   }
 
+  readQualityState(): string | null {
+    const row = this.database.prepare("SELECT payload FROM quality_state WHERE id = 1").get() as { payload?: unknown } | undefined;
+    return typeof row?.payload === "string" ? row.payload : null;
+  }
+
+  writeQualityState(snapshot: string): void {
+    const value = JSON.parse(snapshot) as import("../../shared/control-plane-contracts").EvalStateSnapshot;
+    if (!Number.isInteger(value.revision) || !Array.isArray(value.cases) || !Array.isArray(value.runs)) throw new Error("Invalid quality state snapshot");
+    this.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO quality_state(id, revision, payload, updated_at) VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, payload = excluded.payload, updated_at = excluded.updated_at
+      `).run(value.revision, snapshot, Date.now());
+      this.database.exec("DELETE FROM eval_runs; DELETE FROM eval_cases;");
+      const insertCase = this.database.prepare("INSERT INTO eval_cases(id, version, payload, created_at) VALUES (?, ?, ?, ?)");
+      for (const entry of value.cases) insertCase.run(entry.id, entry.version, JSON.stringify(entry), entry.createdAt);
+      const insertRun = this.database.prepare("INSERT INTO eval_runs(id, case_id, case_version, payload, created_at) VALUES (?, ?, ?, ?, ?)");
+      for (const run of value.runs) insertRun.run(run.id, run.caseId, run.caseVersion, JSON.stringify(run), run.createdAt);
+    });
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): boolean {
     return this.transaction(() => {
       const marker = this.database.prepare("SELECT value FROM metadata WHERE key = ?").get("legacy_import_v2");
@@ -237,6 +258,20 @@ export class StorageDatabase {
     return Buffer.from(row.content as Uint8Array).toString("utf8");
   }
 
+  deleteExpiredEventArtifacts(now: number): number {
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error("Invalid artifact retention time");
+    return this.transaction(() => {
+      const expired = this.database.prepare("SELECT sha256 FROM event_artifacts WHERE retention_until <= ?").all(now) as Array<{ sha256: string }>;
+      const removeContent = this.database.prepare("DELETE FROM event_artifacts WHERE sha256 = ?");
+      const removeCatalog = this.database.prepare("DELETE FROM artifacts WHERE sha256 = ? AND retention_until <= ?");
+      for (const { sha256 } of expired) {
+        removeContent.run(sha256);
+        removeCatalog.run(sha256, now);
+      }
+      return expired.length;
+    });
+  }
+
   inspect(): DatabaseInspection {
     const tables = this.database.prepare(`
       SELECT name FROM sqlite_schema
@@ -337,6 +372,14 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
     return this.enqueue(() => this.requireDatabase().writeControlRuntime(snapshot));
   }
 
+  readQualityState(): Promise<string | null> {
+    return this.enqueue(() => this.requireDatabase().readQualityState());
+  }
+
+  writeQualityState(snapshot: string): Promise<void> {
+    return this.enqueue(() => this.requireDatabase().writeQualityState(snapshot));
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
   }
@@ -359,6 +402,10 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
 
   readEventArtifact(sha256: string): Promise<string | null> {
     return this.enqueue(() => this.requireDatabase().readEventArtifact(sha256));
+  }
+
+  deleteExpiredEventArtifacts(now: number): Promise<number> {
+    return this.enqueue(() => this.requireDatabase().deleteExpiredEventArtifacts(now));
   }
 
   inspect(): Promise<DatabaseInspection> {
@@ -436,6 +483,14 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
     return this.request({ type: "write_control_runtime", snapshot }).then(() => undefined);
   }
 
+  readQualityState(): Promise<string | null> {
+    return this.request({ type: "read_quality_state" });
+  }
+
+  writeQualityState(snapshot: string): Promise<void> {
+    return this.request({ type: "write_quality_state", snapshot }).then(() => undefined);
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.request({ type: "import_legacy_snapshot", snapshot, source, importedAt });
   }
@@ -458,6 +513,10 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 
   readEventArtifact(sha256: string): Promise<string | null> {
     return this.request({ type: "read_event_artifact", sha256 });
+  }
+
+  deleteExpiredEventArtifacts(now: number): Promise<number> {
+    return this.request({ type: "delete_expired_event_artifacts", now });
   }
 
   inspect(): Promise<DatabaseInspection> {
