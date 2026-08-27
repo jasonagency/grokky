@@ -86,11 +86,14 @@ The renderer receives complete application snapshots. It never receives a provid
 | Agents | `src/main/agents.ts` | Discover, create, update, and delete Codex TOML agents |
 | State facade | `src/main/state-store.ts` | Normalize snapshots, import legacy JSON once, and preserve the controller contract |
 | Storage | `src/main/storage` | Own SQLite, forward-only migrations, serialized requests, and repositories |
+| Control plane | `src/main/control-plane` | Validate ordered domain events, update projections transactionally, rebuild state, and publish bounded changes |
 | Renderer | `src/renderer/src` | Present sessions, messages, activity, crews, settings, and approvals |
 
 ## Snapshot state model
 
 The main process is authoritative. React does not optimistically own durable conversation state. During the U1 compatibility release, `StateStore` reads and writes one normalized snapshot inside SQLite while the normalized tables and event schema are established for later projection ownership.
+
+Run history now also flows through stable, append-only control-plane events. Each aggregate has a monotonic sequence; duplicate event IDs are idempotent, and sequence gaps are quarantined as diagnostics. The storage worker commits an event, its conversation projection, and any content-addressed artifact in one transaction. On restart, the projector can rebuild its bounded active-run view from events and referenced artifacts alone. The renderer receives sanitized projection changes over a dedicated IPC channel and retains full snapshot retrieval for startup and gap recovery.
 
 ```mermaid
 stateDiagram-v2

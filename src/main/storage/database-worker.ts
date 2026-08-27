@@ -20,6 +20,16 @@ port.on("message", (request: DatabaseRequest) => {
       response = { id: request.id, ok: true };
     } else if (command.type === "import_legacy_snapshot") {
       response = { id: request.id, ok: true, value: database.importLegacySnapshot(command.snapshot, command.source, command.importedAt) };
+    } else if (command.type === "append_event") {
+      response = { id: request.id, ok: true, value: database.appendEvent(command.request) };
+    } else if (command.type === "list_events") {
+      response = { id: request.id, ok: true, value: database.listEvents() };
+    } else if (command.type === "list_event_diagnostics") {
+      response = { id: request.id, ok: true, value: database.listEventDiagnostics() };
+    } else if (command.type === "list_conversation_projections") {
+      response = { id: request.id, ok: true, value: database.listConversationProjections() };
+    } else if (command.type === "read_event_artifact") {
+      response = { id: request.id, ok: true, value: database.readEventArtifact(command.sha256) };
     } else if (command.type === "inspect") response = { id: request.id, ok: true, value: database.inspect() };
     else {
       database.close();

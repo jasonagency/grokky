@@ -7,6 +7,7 @@ import { createElectronComputerHost, createElectronComputerSecrets } from "./com
 import { registerIpc } from "./ipc";
 import { StateStore, sqlitePathForLegacy } from "./state-store";
 import { WorkerDatabaseClient } from "./storage/database-client";
+import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { IPC } from "../shared/contracts";
 
 let mainWindow: BrowserWindow | null = null;
@@ -55,8 +56,9 @@ async function createWindow(controller: MainController): Promise<void> {
 
 app.whenReady().then(async () => {
   const legacyStatePath = join(app.getPath("userData"), "conversations.json");
+  const database = new WorkerDatabaseClient(sqlitePathForLegacy(legacyStatePath));
   stateStore = new StateStore(legacyStatePath, app.getPath("home"), {
-    database: new WorkerDatabaseClient(sqlitePathForLegacy(legacyStatePath)),
+    database,
   });
   const controller = new MainController(
     stateStore,
@@ -66,6 +68,7 @@ app.whenReady().then(async () => {
       host: createElectronComputerHost(join(app.getPath("temp"), "grokky-captures")),
       secrets: createElectronComputerSecrets(),
     }),
+    new ControlPlaneService(database),
   );
   await controller.initialize();
   registerIpc(controller);

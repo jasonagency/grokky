@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSnapshot, AppSettings, ConversationPatch, GrokkyApi } from "../shared/contracts";
+import type { ProjectionChange } from "../shared/control-plane-contracts";
 import { IPC } from "../shared/contracts";
 import { userFacingError } from "../shared/errors";
 
 let snapshotListener: ((_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) => void) | undefined;
+let projectionListener: ((_event: Electron.IpcRendererEvent, change: ProjectionChange) => void) | undefined;
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   try {
@@ -47,6 +49,11 @@ const api: GrokkyApi = {
     if (snapshotListener) ipcRenderer.removeListener(IPC.snapshotChanged, snapshotListener);
     snapshotListener = (_event: Electron.IpcRendererEvent, snapshot: AppSnapshot) => listener(snapshot);
     ipcRenderer.on(IPC.snapshotChanged, snapshotListener);
+  },
+  onProjection: (listener: (change: ProjectionChange) => void) => {
+    if (projectionListener) ipcRenderer.removeListener(IPC.projectionChanged, projectionListener);
+    projectionListener = (_event: Electron.IpcRendererEvent, change: ProjectionChange) => listener(change);
+    ipcRenderer.on(IPC.projectionChanged, projectionListener);
   },
 };
 

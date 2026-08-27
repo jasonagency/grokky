@@ -1,3 +1,5 @@
+import type { ProjectionChange } from "./control-plane-contracts";
+
 export type ProviderId = "codex" | "openrouter";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type SandboxMode = "read-only" | "workspace-write";
@@ -293,11 +295,13 @@ export interface GrokkyApi {
   resolveComputerApproval(id: string, decision: ComputerApprovalDecision): Promise<void>;
   openExternal(url: string): Promise<void>;
   onSnapshot(listener: (snapshot: AppSnapshot) => void): void;
+  onProjection(listener: (change: ProjectionChange) => void): void;
 }
 
 export const IPC = {
   snapshotGet: "grokky:snapshot:get",
   snapshotChanged: "grokky:snapshot:changed",
+  projectionChanged: "grokky:projection:changed",
   conversationCreate: "grokky:conversation:create",
   conversationActivate: "grokky:conversation:activate",
   conversationUpdate: "grokky:conversation:update",

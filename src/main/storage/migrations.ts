@@ -109,6 +109,40 @@ const migrations: Migration[] = [{
       CREATE INDEX runs_conversation_order ON runs(conversation_id, created_at);
     `);
   },
+}, {
+  version: 2,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE conversation_projections (
+        aggregate_id TEXT PRIMARY KEY,
+        aggregate_sequence INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE event_diagnostics (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL UNIQUE,
+        aggregate_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        expected_sequence INTEGER,
+        actual_sequence INTEGER,
+        created_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE event_artifacts (
+        sha256 TEXT PRIMARY KEY,
+        content BLOB NOT NULL,
+        byte_size INTEGER NOT NULL,
+        media_type TEXT NOT NULL,
+        retention_until INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE INDEX event_diagnostics_aggregate_order ON event_diagnostics(aggregate_id, created_at);
+    `);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {

@@ -473,7 +473,7 @@ macOS:  $HOME/Library/Application Support/Grokky/conversations.sqlite3
 Windows: %APPDATA%\Grokky\conversations.sqlite3
 ```
 
-The database contains conversations, messages, activity summaries, settings, usage, Codex thread IDs, access policy, recent audit entries, and encrypted remote-runner tokens. A dedicated worker owns the SQLite connection, applies forward-only migrations, and serializes writes. The database file uses private filesystem permissions and write-ahead logging.
+The database contains conversations, messages, activity summaries, settings, usage, Codex thread IDs, access policy, recent audit entries, and encrypted remote-runner tokens. A dedicated worker owns the SQLite connection, applies forward-only migrations, and serializes writes. Run activity is also captured as ordered, append-only domain events with rebuildable conversation projections. Large event content becomes a bounded, content-addressed local artifact. The database file uses private filesystem permissions and write-ahead logging.
 
 On first launch after this migration, Grokky imports `conversations.json` once, preserves it unchanged, and creates `conversations.json.legacy-v2-backup`. The SQLite import marker prevents a later launch from importing the same records again.
 

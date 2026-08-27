@@ -36,6 +36,11 @@ describe("StateStore", () => {
       readSnapshot: () => Promise.resolve(null),
       writeSnapshot: () => Promise.resolve(),
       importLegacySnapshot: () => Promise.resolve(false),
+      appendEvent: () => Promise.resolve({ status: "appended", sequence: 1 }),
+      listEvents: () => Promise.resolve([]),
+      listEventDiagnostics: () => Promise.resolve([]),
+      listConversationProjections: () => Promise.resolve({}),
+      readEventArtifact: () => Promise.resolve(null),
       inspect: () => Promise.resolve({ schemaVersion: 0, appliedMigrations: [], journalMode: "unknown", tables: [] }),
       close: () => Promise.resolve(),
     };

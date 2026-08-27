@@ -59,6 +59,7 @@ import type {
   SandboxMode,
   SkillCapability,
 } from "../../shared/contracts";
+import type { ProjectionChange } from "../../shared/control-plane-contracts";
 import { CODEX_MODELS } from "../../shared/contracts";
 import { requiresDevelopmentCommands, requiresProjectDirectory } from "../../shared/run-preflight";
 import { botVariantAt, botVariantForIdentity, type BotVariant } from "./bot-identity";
@@ -1589,6 +1590,17 @@ export function App() {
   useEffect(() => {
     void window.grokky.getSnapshot().then(setSnapshot).catch((error) => setUiError(error.message));
     window.grokky.onSnapshot(setSnapshot);
+    window.grokky.onProjection((change: ProjectionChange) => {
+      if (change.kind !== "conversation") return;
+      setSnapshot((current) => {
+        if (!current) return current;
+        const index = current.conversations.findIndex((conversation) => conversation.id === change.conversation.id);
+        const conversations = [...current.conversations];
+        if (index >= 0) conversations[index] = change.conversation;
+        else conversations.unshift(change.conversation);
+        return { ...current, conversations };
+      });
+    });
   }, []);
 
   useEffect(() => {

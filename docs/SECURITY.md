@@ -206,6 +206,8 @@ The main process sends persistence requests to a dedicated worker that owns one 
 
 The first SQLite launch may read the previous `conversations.json` file. Grokky copies that source to a private legacy backup before importing a normalized snapshot and an import marker in one transaction. The source and backup remain recoverable if import or a later migration fails, and a completed marker prevents duplicate imports.
 
+Control-plane events use stable IDs and per-aggregate sequences. Duplicate IDs do not reapply a projection, and a sequence gap is stored as a bounded diagnostic rather than mutating live state. Renderer projection messages contain only bounded UI contracts and never database handles, worker commands, or credential sources. Event payloads larger than 48 KiB become SHA-256-addressed SQLite artifacts capped at 2 MiB with retention metadata; projection content is independently truncated before IPC delivery.
+
 Local state contains private information, including messages, workspace paths, provider selection, selected agents, activity details, audit targets, and remote endpoint metadata. It is not committed, but any local backup or device-management system may copy it.
 
 Deleting a conversation removes it from Grokky's state after cancelling active work. It does not securely erase prior filesystem blocks or copies held by backups, provider services, Codex home data, or workspace version history.

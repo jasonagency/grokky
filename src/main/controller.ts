@@ -14,6 +14,7 @@ import type {
   ComputerAccessLevel,
   ComputerApprovalDecision,
   ComputerApprovalRequest,
+  ComputerAuditEntry,
   ComputerCapabilityId,
   Conversation,
   ConversationPatch,
@@ -29,6 +30,9 @@ import { providerStatuses, resolveOpenRouterCredential } from "./credentials";
 import { runCodex } from "./providers/codex-provider";
 import { runOpenRouter } from "./providers/openrouter-provider";
 import type { ProviderEvent } from "./providers/types";
+import type { ControlPlaneEventType } from "../shared/control-plane-contracts";
+import { ControlPlaneService } from "./control-plane/control-plane-service";
+import { boundedConversationProjection } from "./control-plane/event-projector";
 import { communicationsFromOrchestrationEvent, mergeCrewCommunications } from "./crew-communications";
 import { noProjectDirectory, StateStore, type PersistentState } from "./state-store";
 
@@ -68,18 +72,21 @@ export class MainController {
   private statuses: ProviderStatus[] = [];
   private window: BrowserWindow | null = null;
   private readonly runs = new Map<string, AbortController>();
+  private readonly runIds = new Map<string, string>();
   private readonly runAgentIcons = new Map<string, Map<string, AgentIcon>>();
   private readonly pendingApprovals: ComputerApprovalRequest[] = [];
   private readonly approvalResolvers = new Map<string, (decision: ComputerApprovalDecision) => void>();
   private readonly sessionComputerGrants = new Map<string, Set<ComputerCapabilityId>>();
   private readonly capabilities: CapabilitiesService;
   private readonly agents: AgentService;
+  private unsubscribeProjection?: () => void;
 
   constructor(
     private readonly store: StateStore,
     private readonly homeDirectory: string,
     private readonly appVersion: string,
     private readonly computerAccess = new ComputerAccessService(),
+    private readonly controlPlane?: ControlPlaneService,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -87,6 +94,7 @@ export class MainController {
 
   async initialize(): Promise<void> {
     this.state = await this.store.load();
+    await this.controlPlane?.initialize({ conversations: this.state.conversations });
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
     if (!this.state.settings.openRouterCredentialPath) {
       const credential = await resolveOpenRouterCredential(this.state.settings, this.homeDirectory);
@@ -101,12 +109,18 @@ export class MainController {
 
   attachWindow(window: BrowserWindow): void {
     this.window = window;
+    this.unsubscribeProjection?.();
+    this.unsubscribeProjection = this.controlPlane?.subscribe((change) => {
+      if (this.window && !this.window.isDestroyed()) this.window.webContents.send(IPC.projectionChanged, change);
+    });
     this.publishSnapshot();
   }
 
   snapshot(): AppSnapshot {
     return structuredClone({
-      conversations: [...this.state.conversations].sort((left, right) => right.updatedAt - left.updatedAt),
+      conversations: [...this.state.conversations]
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .map(boundedConversationProjection),
       ...(this.state.activeConversationId ? { activeConversationId: this.state.activeConversationId } : {}),
       settings: this.state.settings,
       providerStatuses: this.statuses,
@@ -217,7 +231,11 @@ export class MainController {
     conversation.error = undefined;
     conversation.updatedAt = now;
     const controller = new AbortController();
+    const runId = id();
     this.runs.set(conversationId, controller);
+    this.runIds.set(conversationId, runId);
+    await this.recordConversationEvent(conversation, "conversation.snapshot", { conversation: boundedConversationProjection(conversation) }, runId);
+    await this.recordConversationEvent(conversation, "run.started", { promptMessageId: message.id }, runId);
     await this.commit();
     void this.executeRun(conversationId, text, controller);
   }
@@ -226,6 +244,8 @@ export class MainController {
     const conversation = this.requireConversation(conversationId);
     this.runs.get(conversationId)?.abort();
     this.runs.delete(conversationId);
+    const runId = this.runIds.get(conversationId);
+    this.runIds.delete(conversationId);
     this.denyPendingApprovals(conversationId);
     conversation.status = "idle";
     conversation.lastRunOutcome = "stopped";
@@ -236,6 +256,7 @@ export class MainController {
         : run
     ));
     conversation.updatedAt = Date.now();
+    await this.recordConversationEvent(conversation, "run.stopped", { reason: "operator" }, runId);
     await this.commit();
   }
 
@@ -272,9 +293,11 @@ export class MainController {
     const target = capability === "files" || capability === "commands" ? conversation.workingDirectory : "local capability check";
     try {
       const detail = await this.computerAccess.test(this.state.computerAccess, capability, conversation);
-      this.appendComputerAudit(conversation, capability, `test_${capability}`, target, "allowed", "completed", detail.slice(0, 2_000));
+      const audit = this.appendComputerAudit(conversation, capability, `test_${capability}`, target, "allowed", "completed", detail.slice(0, 2_000));
+      await this.recordAuditEvent(conversation, audit);
     } catch (error) {
-      this.appendComputerAudit(conversation, capability, `test_${capability}`, target, "allowed", "failed", error instanceof Error ? error.message : "Capability test failed");
+      const audit = this.appendComputerAudit(conversation, capability, `test_${capability}`, target, "allowed", "failed", error instanceof Error ? error.message : "Capability test failed");
+      await this.recordAuditEvent(conversation, audit);
       await this.commit();
       throw error;
     }
@@ -313,6 +336,8 @@ export class MainController {
     }
     this.approvalResolvers.get(approvalId)?.(decision);
     this.approvalResolvers.delete(approvalId);
+    const conversation = this.requireConversation(approval.conversationId);
+    await this.recordConversationEvent(conversation, "approval.resolved", { approvalId, decision }, this.runIds.get(conversation.id));
     this.publishSnapshot();
   }
 
@@ -382,6 +407,7 @@ export class MainController {
         current.lastRunOutcome = classifyRunOutcome(current, conversation.selectedAgentIds.length);
         current.error = undefined;
         current.updatedAt = Date.now();
+        await this.recordConversationEvent(current, "run.completed", { outcome: current.lastRunOutcome }, this.runIds.get(conversationId));
         await this.commit();
       }
     } catch (error) {
@@ -391,10 +417,17 @@ export class MainController {
         current.lastRunOutcome = controller.signal.aborted ? "stopped" : "failed";
         current.error = controller.signal.aborted ? "Run stopped" : error instanceof Error ? error.message : "Provider run failed";
         current.updatedAt = Date.now();
+        await this.recordConversationEvent(
+          current,
+          controller.signal.aborted ? "run.stopped" : "run.failed",
+          controller.signal.aborted ? { reason: "aborted" } : { error: current.error },
+          this.runIds.get(conversationId),
+        );
         await this.commit();
       }
     } finally {
       if (this.runs.get(conversationId) === controller) this.runs.delete(conversationId);
+      this.runIds.delete(conversationId);
       this.runAgentIcons.delete(conversationId);
     }
   }
@@ -402,16 +435,21 @@ export class MainController {
   private async applyProviderEvent(conversationId: string, event: ProviderEvent): Promise<void> {
     const conversation = this.state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
+    let eventType: ControlPlaneEventType;
+    let eventPayload: unknown;
     if (event.type === "thread") conversation.threadId = event.threadId;
     if (event.type === "usage") conversation.usage = event.usage;
     if (event.type === "final") {
-      conversation.messages.push({
+      const message: ChatMessage = {
         id: id(),
         role: "assistant",
         content: event.text,
         createdAt: Date.now(),
         provider: conversation.provider,
-      });
+      };
+      conversation.messages.push(message);
+      eventType = "run.final";
+      eventPayload = { message };
     }
     if (event.type === "activity") {
       const index = conversation.activities.findIndex((item) => item.id === event.activity.id);
@@ -486,6 +524,20 @@ export class MainController {
       );
     }
     conversation.updatedAt = Date.now();
+    if (event.type === "thread") {
+      eventType = "provider.thread";
+      eventPayload = { threadId: event.threadId };
+    } else if (event.type === "usage") {
+      eventType = "usage.updated";
+      eventPayload = { usage: event.usage };
+    } else if (event.type === "activity") {
+      eventType = "provider.activity";
+      eventPayload = { activity: event.activity };
+    } else if (event.type === "orchestration") {
+      eventType = "orchestration.updated";
+      eventPayload = { event: event.event, icons: Object.fromEntries(this.runAgentIcons.get(conversationId) ?? []) };
+    }
+    await this.recordConversationEvent(conversation, eventType!, eventPayload, this.runIds.get(conversationId));
     await this.commit();
   }
 
@@ -503,12 +555,14 @@ export class MainController {
     const approvedTarget = await this.authorizeComputerTool(conversation, capability, name, target);
     try {
       const output = await this.computerAccess.execute({ state: this.state.computerAccess, conversation, name, args, approvedTarget });
-      this.appendComputerAudit(conversation, capability, name, target, "allowed", "completed", output.slice(0, 2_000));
+      const audit = this.appendComputerAudit(conversation, capability, name, target, "allowed", "completed", output.slice(0, 2_000));
+      await this.recordAuditEvent(conversation, audit);
       await this.commit();
       return output;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Computer action failed";
-      this.appendComputerAudit(conversation, capability, name, target, "allowed", "failed", message);
+      const audit = this.appendComputerAudit(conversation, capability, name, target, "allowed", "failed", message);
+      await this.recordAuditEvent(conversation, audit);
       await this.commit();
       throw error;
     }
@@ -517,7 +571,8 @@ export class MainController {
   private async authorizeComputerTool(conversation: Conversation, capability: ComputerCapabilityId, action: string, target: string): Promise<boolean> {
     const access = this.state.computerAccess;
     if (!access.enabled || access.grants[capability] === "blocked") {
-      this.appendComputerAudit(conversation, capability, action, target, "denied", "failed", access.enabled ? "Capability is blocked" : "Computer access is disabled");
+      const audit = this.appendComputerAudit(conversation, capability, action, target, "denied", "failed", access.enabled ? "Capability is blocked" : "Computer access is disabled");
+      await this.recordAuditEvent(conversation, audit);
       await this.commit();
       throw new Error(access.enabled ? `${capability} access is blocked` : "Computer access is disabled");
     }
@@ -535,10 +590,12 @@ export class MainController {
       createdAt: Date.now(),
     };
     this.pendingApprovals.push(approval);
+    await this.recordConversationEvent(conversation, "approval.requested", { approval }, this.runIds.get(conversation.id));
     this.publishSnapshot();
     const decision = await new Promise<ComputerApprovalDecision>((resolve) => this.approvalResolvers.set(approval.id, resolve));
     if (decision === "deny") {
-      this.appendComputerAudit(conversation, capability, action, target, "denied", "failed", "User denied the computer action");
+      const audit = this.appendComputerAudit(conversation, capability, action, target, "denied", "failed", "User denied the computer action");
+      await this.recordAuditEvent(conversation, audit);
       await this.commit();
       throw new Error("Computer action was denied");
     }
@@ -553,8 +610,8 @@ export class MainController {
     decision: "allowed" | "denied",
     status: "completed" | "failed",
     detail?: string,
-  ): void {
-    this.state.computerAccess.auditLog.push({
+  ): ComputerAuditEntry {
+    const audit: ComputerAuditEntry = {
       id: newAuditId(),
       deviceId: this.state.computerAccess.activeDeviceId,
       conversationId: conversation.id,
@@ -566,8 +623,10 @@ export class MainController {
       status,
       ...(detail ? { detail } : {}),
       createdAt: Date.now(),
-    });
+    };
+    this.state.computerAccess.auditLog.push(audit);
     this.state.computerAccess.auditLog = this.state.computerAccess.auditLog.slice(-250);
+    return audit;
   }
 
   private denyPendingApprovals(conversationId: string): void {
@@ -591,6 +650,27 @@ export class MainController {
     const recents = this.state.settings.recentWorkingDirectories.filter((item) => resolve(item) !== normalized);
     this.state.settings.recentWorkingDirectories = [pathname, ...recents].slice(0, 12);
     this.state.settings.defaultWorkingDirectory = pathname;
+  }
+
+  private async recordConversationEvent(
+    conversation: Conversation,
+    type: ControlPlaneEventType,
+    payload: unknown,
+    runId?: string,
+  ): Promise<void> {
+    if (!this.controlPlane) return;
+    await this.controlPlane.record({
+      aggregateId: conversation.id,
+      conversationId: conversation.id,
+      ...(runId ? { runId } : {}),
+      source: "grokky.controller",
+      type,
+      payload,
+    });
+  }
+
+  private recordAuditEvent(conversation: Conversation, audit: ComputerAuditEntry): Promise<void> {
+    return this.recordConversationEvent(conversation, "audit.recorded", { audit }, this.runIds.get(conversation.id));
   }
 
   private async commit(): Promise<void> {

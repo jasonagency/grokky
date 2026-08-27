@@ -2,6 +2,12 @@ import { chmod, mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
+import type {
+  ControlPlaneEvent,
+  EventAppendResult,
+  EventDiagnostic,
+  StoredEventAppend,
+} from "../../shared/control-plane-contracts";
 import { applyMigrations } from "./migrations";
 import type {
   ControlPlaneDatabase,
@@ -60,6 +66,102 @@ export class StorageDatabase {
     });
   }
 
+  appendEvent(request: StoredEventAppend): EventAppendResult {
+    const event = JSON.parse(request.event) as ControlPlaneEvent;
+    return this.transaction(() => {
+      const duplicate = this.database.prepare("SELECT aggregate_sequence FROM events WHERE id = ?").get(event.id) as { aggregate_sequence: number } | undefined;
+      if (duplicate) return { status: "duplicate", sequence: duplicate.aggregate_sequence };
+
+      const latest = this.database.prepare("SELECT MAX(aggregate_sequence) AS sequence FROM events WHERE aggregate_id = ?").get(event.aggregateId) as { sequence: number | null };
+      const expectedSequence = (latest.sequence ?? 0) + 1;
+      if (event.sequence !== expectedSequence) {
+        const diagnostic: EventDiagnostic = {
+          id: `diagnostic:${event.id}`,
+          eventId: event.id,
+          aggregateId: event.aggregateId,
+          code: "aggregate_sequence_gap",
+          detail: `Rejected aggregate sequence ${event.sequence}; expected ${expectedSequence}.`,
+          expectedSequence,
+          actualSequence: event.sequence,
+          createdAt: Date.now(),
+        };
+        this.database.prepare(`
+          INSERT OR IGNORE INTO event_diagnostics(
+            id, event_id, aggregate_id, code, detail, expected_sequence, actual_sequence, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          diagnostic.id,
+          diagnostic.eventId,
+          diagnostic.aggregateId,
+          diagnostic.code,
+          diagnostic.detail,
+          diagnostic.expectedSequence ?? null,
+          diagnostic.actualSequence ?? null,
+          diagnostic.createdAt,
+        );
+        const stored = this.database.prepare("SELECT * FROM event_diagnostics WHERE event_id = ?").get(event.id) as Record<string, unknown>;
+        return {
+          status: "rejected",
+          expectedSequence,
+          actualSequence: event.sequence,
+          diagnostic: this.diagnosticFromRow(stored),
+        };
+      }
+
+      if (request.artifact) {
+        const { reference, content } = request.artifact;
+        this.database.prepare(`
+          INSERT OR IGNORE INTO event_artifacts(sha256, content, byte_size, media_type, retention_until, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(reference.sha256, Buffer.from(content, "utf8"), reference.byteSize, reference.mediaType, reference.retentionUntil, event.timestamp);
+        this.database.prepare(`
+          INSERT OR IGNORE INTO artifacts(id, sha256, byte_size, media_type, storage_path, retention_until, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(reference.sha256, reference.sha256, reference.byteSize, reference.mediaType, reference.storagePath, reference.retentionUntil, event.timestamp);
+      }
+      this.database.prepare(`
+        INSERT INTO events(id, aggregate_id, aggregate_sequence, event_type, schema_version, payload, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(event.id, event.aggregateId, event.sequence, event.type, event.schemaVersion, request.event, event.timestamp);
+      if (request.projection) {
+        JSON.parse(request.projection);
+        this.database.prepare(`
+          INSERT INTO conversation_projections(aggregate_id, aggregate_sequence, payload, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(aggregate_id) DO UPDATE SET
+            aggregate_sequence = excluded.aggregate_sequence,
+            payload = excluded.payload,
+            updated_at = excluded.updated_at
+        `).run(event.aggregateId, event.sequence, request.projection, event.timestamp);
+      }
+      return { status: "appended", sequence: event.sequence };
+    });
+  }
+
+  listEvents(): string[] {
+    return this.database.prepare("SELECT payload FROM events ORDER BY created_at, aggregate_id, aggregate_sequence").all()
+      .map((row) => String((row as { payload: string }).payload));
+  }
+
+  listEventDiagnostics(): EventDiagnostic[] {
+    return this.database.prepare("SELECT * FROM event_diagnostics ORDER BY created_at, id").all()
+      .map((row) => this.diagnosticFromRow(row as Record<string, unknown>));
+  }
+
+  listConversationProjections(): Record<string, string> {
+    return Object.fromEntries(this.database.prepare("SELECT aggregate_id, payload FROM conversation_projections ORDER BY aggregate_id").all()
+      .map((row) => {
+        const projection = row as { aggregate_id: string; payload: string };
+        return [projection.aggregate_id, projection.payload];
+      }));
+  }
+
+  readEventArtifact(sha256: string): string | null {
+    const row = this.database.prepare("SELECT content FROM event_artifacts WHERE sha256 = ?").get(sha256) as { content?: unknown } | undefined;
+    if (!row?.content) return null;
+    return Buffer.from(row.content as Uint8Array).toString("utf8");
+  }
+
   inspect(): DatabaseInspection {
     const tables = this.database.prepare(`
       SELECT name FROM sqlite_schema
@@ -86,6 +188,19 @@ export class StorageDatabase {
       INSERT INTO snapshots(id, payload, updated_at) VALUES (1, ?, ?)
       ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
     `).run(snapshot, Date.now());
+  }
+
+  private diagnosticFromRow(row: Record<string, unknown>): EventDiagnostic {
+    return {
+      id: String(row.id),
+      eventId: String(row.event_id),
+      aggregateId: String(row.aggregate_id),
+      code: String(row.code) as EventDiagnostic["code"],
+      detail: String(row.detail),
+      ...(typeof row.expected_sequence === "number" ? { expectedSequence: row.expected_sequence } : {}),
+      ...(typeof row.actual_sequence === "number" ? { actualSequence: row.actual_sequence } : {}),
+      createdAt: Number(row.created_at),
+    };
   }
 
   private transaction<T>(operation: () => T): T {
@@ -125,6 +240,26 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
+  }
+
+  appendEvent(request: StoredEventAppend): Promise<EventAppendResult> {
+    return this.enqueue(() => this.requireDatabase().appendEvent(request));
+  }
+
+  listEvents(): Promise<string[]> {
+    return this.enqueue(() => this.requireDatabase().listEvents());
+  }
+
+  listEventDiagnostics(): Promise<EventDiagnostic[]> {
+    return this.enqueue(() => this.requireDatabase().listEventDiagnostics());
+  }
+
+  listConversationProjections(): Promise<Record<string, string>> {
+    return this.enqueue(() => this.requireDatabase().listConversationProjections());
+  }
+
+  readEventArtifact(sha256: string): Promise<string | null> {
+    return this.enqueue(() => this.requireDatabase().readEventArtifact(sha256));
   }
 
   inspect(): Promise<DatabaseInspection> {
@@ -180,6 +315,26 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.request({ type: "import_legacy_snapshot", snapshot, source, importedAt });
+  }
+
+  appendEvent(request: StoredEventAppend): Promise<EventAppendResult> {
+    return this.request({ type: "append_event", request });
+  }
+
+  listEvents(): Promise<string[]> {
+    return this.request({ type: "list_events" });
+  }
+
+  listEventDiagnostics(): Promise<EventDiagnostic[]> {
+    return this.request({ type: "list_event_diagnostics" });
+  }
+
+  listConversationProjections(): Promise<Record<string, string>> {
+    return this.request({ type: "list_conversation_projections" });
+  }
+
+  readEventArtifact(sha256: string): Promise<string | null> {
+    return this.request({ type: "read_event_artifact", sha256 });
   }
 
   inspect(): Promise<DatabaseInspection> {
