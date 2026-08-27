@@ -36,7 +36,7 @@ export function packagedCodexCandidate(resourcesPath: string, platform: NodeJS.P
   );
 }
 
-function packagedCodexPath(): string | undefined {
+export function packagedCodexPath(): string | undefined {
   if (!process.resourcesPath) return undefined;
   const candidate = packagedCodexCandidate(process.resourcesPath, process.platform, process.arch);
   if (!candidate) return undefined;

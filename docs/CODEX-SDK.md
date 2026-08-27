@@ -1,22 +1,25 @@
-# Codex SDK integration
+# Codex App Server and SDK integration
 
-This guide explains how Grokky uses the official Codex SDK, how authentication and thread persistence work, which options are applied, how multi-agent events reach the interface, and what changes when Electron is packaged.
+This guide explains how Grokky uses the local Codex App Server by default and retains the official Codex SDK as a rollout fallback.
 
 Primary references:
 
 - [Codex SDK guide](https://learn.chatgpt.com/docs/codex-sdk)
+- [Codex App Server](https://learn.chatgpt.com/docs/app-server)
 - [`@openai/codex-sdk` package](https://www.npmjs.com/package/@openai/codex-sdk)
 
 ## Integration boundary
 
-The SDK runs only in Electron's main process.
+Both adapters run only in Electron's main process. New conversations select App Server. Conversations persisted with `codex-sdk` keep using the SDK, and an App Server startup or handshake failure records a visible fallback activity before using the SDK for that run.
 
 ```mermaid
 flowchart LR
   UI[React renderer] -->|typed IPC| MAIN[MainController]
-  MAIN --> ADAPTER[Codex provider]
-  ADAPTER --> SDK[@openai/codex-sdk]
-  SDK --> CLI[Local Codex runtime]
+  MAIN --> ADAPTER[Harness registry]
+  ADAPTER --> APP[Codex App Server over stdio]
+  ADAPTER -. startup fallback .-> SDK[@openai/codex-sdk]
+  APP --> CLI[Bundled Codex runtime]
+  SDK --> CLI
   CLI --> AUTH[Existing Codex sign-in]
   CLI --> WORKSPACE[Selected workspace]
   CLI --> REMOTE[OpenAI services]
@@ -48,7 +51,15 @@ codex login
 
 The readiness check only reports whether the auth file is readable. The SDK and local Codex runtime own the actual authentication lifecycle.
 
-## Client creation
+## App Server protocol
+
+Grokky launches the bundled executable as `codex app-server --stdio`, sends `initialize`, validates the response, then sends `initialized`. Requests and responses are newline-delimited JSON. Messages are capped at 2 MiB, pending calls time out, malformed JSON and process exits reject the active attempt, and server request arguments never cross into the renderer.
+
+The adapter maps `thread/start`, `thread/resume`, `turn/start`, `turn/steer`, `turn/interrupt`, `thread/queue/add`, item events, token usage, and turn completion into the provider-neutral harness contract. Steering includes the active turn ID as a precondition, so stale commands are visibly rejected instead of reaching a newer turn. Server-initiated command and file approvals are reduced to a safe label and reason, then decided from Grokky's workspace and command policy.
+
+Run `npm run codex:generate-protocol` after updating the Codex package to inspect version-matched experimental TypeScript bindings. Review protocol changes and update the bounded client types and fixtures in the same dependency change.
+
+## SDK fallback client creation
 
 `runCodex` creates a client for each conversation turn so the configuration reflects current application settings.
 

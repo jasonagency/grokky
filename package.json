@@ -26,6 +26,8 @@
     "verify:package:mac": "node scripts/check-packaged-codex.mjs darwin arm64",
     "verify:package:win": "node scripts/check-packaged-codex.mjs win32 x64",
     "smoke:codex": "node scripts/smoke-codex.mjs",
+    "smoke:codex-app-server": "GROKKY_LIVE_CODEX_APP_SERVER=1 vitest run tests/codex-app-server-adapter.integration.test.ts",
+    "codex:generate-protocol": "codex app-server generate-ts --experimental --out src/shared/generated/codex-app-server",
     "smoke:codex-provider": "GROKKY_LIVE_CODEX_PROVIDER=1 vitest run tests/codex-provider.integration.test.ts",
     "smoke:codex-web": "GROKKY_LIVE_CODEX_WEB=1 vitest run tests/codex-web.integration.test.ts",
     "smoke:multiagent": "node scripts/smoke-multiagent.mjs",

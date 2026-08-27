@@ -8,6 +8,7 @@ import type {
 } from "../../shared/harness-contracts";
 import type { ProviderRunContext } from "../providers/types";
 import { CodexSdkAdapter } from "./codex-sdk-adapter";
+import { CodexAppServerAdapter } from "./codex-app-server-adapter";
 import { OpenRouterAdapter } from "./openrouter-adapter";
 import type { HarnessAdapter } from "./types";
 import { validateHarnessEvent } from "./types";
@@ -55,8 +56,11 @@ export class HarnessRegistry {
 
   compatibilityId(provider: ProviderId): string {
     const matches = [...this.adapters.values()].filter((adapter) => adapter.descriptor.providerCompatibility.includes(provider));
-    if (matches.length !== 1) throw new Error(`Expected one compatibility harness for ${provider}; found ${matches.length}`);
-    return matches[0]!.descriptor.id;
+    if (!matches.length) throw new Error(`Expected a compatibility harness for ${provider}; found 0`);
+    const highest = Math.max(...matches.map((adapter) => adapter.descriptor.compatibilityPriority ?? 0));
+    const preferred = matches.filter((adapter) => (adapter.descriptor.compatibilityPriority ?? 0) === highest);
+    if (preferred.length !== 1) throw new Error(`Expected one preferred compatibility harness for ${provider}; found ${preferred.length}`);
+    return preferred[0]!.descriptor.id;
   }
 
   requireCompatible(id: string, required: RequiredHarnessCapabilities): HarnessAdapter {
@@ -109,5 +113,6 @@ export class HarnessRegistry {
 }
 
 export function createDefaultHarnessRegistry(homeDirectory: string): HarnessRegistry {
-  return new HarnessRegistry([new CodexSdkAdapter(), new OpenRouterAdapter(homeDirectory)]);
+  const sdk = new CodexSdkAdapter();
+  return new HarnessRegistry([new CodexAppServerAdapter(undefined, sdk), sdk, new OpenRouterAdapter(homeDirectory)]);
 }

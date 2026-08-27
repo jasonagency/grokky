@@ -26,6 +26,7 @@ export interface HarnessDescriptor {
   version: string;
   displayName: string;
   providerCompatibility: ProviderId[];
+  compatibilityPriority?: number;
   models: HarnessModelDescriptor[];
   capabilities: HarnessCapabilities;
   estimatedInputCostPerMillion?: number;
@@ -68,9 +69,9 @@ export interface HarnessAttempt {
 }
 
 export type HarnessControl =
-  | { type: "cancel" }
-  | { type: "follow-up"; message: string }
-  | { type: "steer"; message: string };
+  | { type: "cancel"; sessionId?: string; turnId?: string }
+  | { type: "follow-up"; message: string; sessionId?: string }
+  | { type: "steer"; message: string; sessionId?: string; turnId?: string };
 
 export interface HarnessControlResult {
   accepted: boolean;

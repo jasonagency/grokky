@@ -99,6 +99,10 @@ This reduces the impact of renderer compromise, but it is not a substitute for k
 
 Grokky checks only for a readable Codex auth file. It does not parse, serialize, render, log, or copy its contents. The official SDK and local Codex runtime own authentication.
 
+The default Codex adapter talks to the bundled App Server through main-process stdio. Protocol messages are bounded and validated before normalization. Server-initiated approval requests expose only a safe action label and optional reason to Grokky; command strings, patch bodies, tool arguments, and authentication details are not forwarded to the renderer. The active workspace, sandbox mode, and command policy remain authoritative. A stale steering or interruption turn ID fails closed.
+
+If App Server cannot launch or complete its handshake before a turn starts, Grokky records the fallback and invokes the SDK compatibility adapter. It never falls back after a turn has started because replaying a partially executed prompt could duplicate side effects.
+
 ### OpenRouter
 
 The API key is resolved in the main process from the inherited environment or a local env file. Only the credential source description appears in provider status. The selected file path may be persisted, so users should understand that the path itself can reveal folder naming inside local state even though it is not sent to the renderer as a key value.
@@ -211,6 +215,8 @@ The first SQLite launch may read the previous `conversations.json` file. Grokky 
 Control-plane events use stable IDs and per-aggregate sequences. Duplicate IDs do not reapply a projection, and a sequence gap is stored as a bounded diagnostic rather than mutating live state. Renderer projection messages contain only bounded UI contracts and never database handles, worker commands, or credential sources. Event payloads larger than 48 KiB become SHA-256-addressed SQLite artifacts capped at 2 MiB with retention metadata; projection content is independently truncated before IPC delivery.
 
 Harness adapters register stable IDs, versions, readiness, and explicit capabilities. The registry rejects duplicate IDs and incompatible assignments before provider code runs. Every adapter event is shape-validated and capped before it can enter the event store. Credential resolution stays inside the adapter and main process; registry snapshots expose labels and source descriptions, not secret values.
+
+Codex App Server stdout accepts newline-delimited messages no larger than 2 MiB. Malformed JSON, unsupported initialization responses, request timeouts, and child-process exits fail pending work with a bounded diagnostic. Approval response payloads contain decisions only.
 
 Local state contains private information, including messages, workspace paths, provider selection, selected agents, activity details, audit targets, and remote endpoint metadata. It is not committed, but any local backup or device-management system may copy it.
 

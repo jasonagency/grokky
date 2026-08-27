@@ -12,6 +12,7 @@ export class CodexSdkAdapter implements HarnessAdapter {
     version: "compat-1",
     displayName: "Codex SDK",
     providerCompatibility: ["codex" as const],
+    compatibilityPriority: 0,
     models: CODEX_MODELS.map((id) => ({ id, label: id })),
     capabilities: {
       sessionPersistence: true,
