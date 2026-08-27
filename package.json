@@ -25,6 +25,8 @@
     "package:win": "node scripts/package-platform.mjs win32 x64 nsis",
     "verify:package:mac": "node scripts/check-packaged-codex.mjs darwin arm64",
     "verify:package:win": "node scripts/check-packaged-codex.mjs win32 x64",
+    "release:mac": "node scripts/package-platform.mjs darwin arm64 dmg --release",
+    "release:win": "node scripts/package-platform.mjs win32 x64 nsis --release",
     "smoke:codex": "node scripts/smoke-codex.mjs",
     "smoke:codex-app-server": "GROKKY_LIVE_CODEX_APP_SERVER=1 vitest run tests/codex-app-server-adapter.integration.test.ts",
     "smoke:pi": "GROKKY_LIVE_PI=1 vitest run tests/pi-adapter.test.ts",
@@ -47,6 +49,7 @@
     "@openrouter/sdk": "^1.2.57",
     "@phosphor-icons/react": "^2.1.10",
     "@sinclair/typebox": "^0.34.41",
+    "electron-updater": "^6.8.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
@@ -80,6 +83,13 @@
     ],
     "asar": true,
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "jasonagency",
+      "repo": "grokky",
+      "releaseType": "release"
+    },
+    "generateUpdatesFilesForAllChannels": true,
     "asarUnpack": [
       "node_modules/@openai/codex-darwin-*/vendor/**/*",
       "node_modules/@openai/codex-win32-*/vendor/**/*"
@@ -87,11 +97,13 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon-mascot.png",
-      "identity": null,
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true,
       "target": [
-        "dir",
-        "dmg"
+        "dmg",
+        "zip"
       ]
     },
     "dmg": {
@@ -99,6 +111,7 @@
     },
     "win": {
       "icon": "build/icon-mascot.png",
+      "verifyUpdateCodeSignature": true,
       "target": [
         "nsis"
       ]

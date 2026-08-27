@@ -1,6 +1,6 @@
-import { chmod, mkdir, open } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { backup as backupSqlite, DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import type {
   ControlPlaneEvent,
@@ -8,7 +8,7 @@ import type {
   EventDiagnostic,
   StoredEventAppend,
 } from "../../shared/control-plane-contracts";
-import { applyMigrations } from "./migrations";
+import { applyMigrations, LATEST_SCHEMA_VERSION } from "./migrations";
 import type {
   ControlPlaneDatabase,
   DatabaseCommand,
@@ -26,11 +26,84 @@ export function assertSqliteRuntime(version = process.versions.node): void {
   }
 }
 
-async function prepareDatabasePath(pathname: string): Promise<void> {
+export async function prepareDatabasePath(pathname: string): Promise<string | undefined> {
   await mkdir(dirname(pathname), { recursive: true });
+  let backupPath: string | undefined;
+  try {
+    const info = await stat(pathname);
+    if (info.isFile() && info.size > 0) {
+      let sourceVersion = 0;
+      let inspection: DatabaseSync | undefined;
+      try {
+        inspection = new DatabaseSync(pathname, { readOnly: true });
+        const row = inspection.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version?: number | null } | undefined;
+        sourceVersion = Number(row?.version ?? 0);
+      } catch {
+        sourceVersion = 0;
+      } finally {
+        inspection?.close();
+      }
+      if (sourceVersion >= LATEST_SCHEMA_VERSION) {
+        const handle = await open(pathname, "a", 0o600);
+        await handle.close();
+        await chmod(pathname, 0o600);
+        return undefined;
+      }
+      backupPath = `${pathname}.pre-migration-backup`;
+      const markerPath = `${backupPath}.json`;
+      let currentTarget: number | undefined;
+      try { currentTarget = Number((JSON.parse(await readFile(markerPath, "utf8")) as { targetSchemaVersion?: unknown }).targetSchemaVersion); }
+      catch { currentTarget = undefined; }
+      if (currentTarget === LATEST_SCHEMA_VERSION) {
+        try {
+          const backup = await stat(backupPath);
+          if (backup.isFile() && backup.size > 0) {
+            await chmod(pathname, 0o600);
+            await chmod(backupPath, 0o600);
+            await chmod(markerPath, 0o600);
+            return backupPath;
+          }
+        } catch {
+          // Recreate a missing or unreadable backup below.
+        }
+      }
+      const temporaryBackup = `${backupPath}.tmp`;
+      await unlink(temporaryBackup).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      });
+      let source: DatabaseSync | undefined;
+      try {
+        source = new DatabaseSync(pathname, { readOnly: true });
+        await backupSqlite(source, temporaryBackup);
+      } catch {
+        await copyFile(pathname, temporaryBackup);
+      } finally {
+        source?.close();
+      }
+      await rename(temporaryBackup, backupPath);
+      await chmod(backupPath, 0o600);
+      await writeFile(markerPath, JSON.stringify({ targetSchemaVersion: LATEST_SCHEMA_VERSION, sourceSchemaVersion: sourceVersion, createdAt: Date.now() }), { encoding: "utf8", mode: 0o600 });
+      await chmod(markerPath, 0o600);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const handle = await open(pathname, "a", 0o600);
   await handle.close();
   await chmod(pathname, 0o600);
+  return backupPath;
+}
+
+async function openDatabaseWithRecovery(pathname: string): Promise<StorageDatabase> {
+  const backupPath = await prepareDatabasePath(pathname);
+  try {
+    return new StorageDatabase(pathname);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Database migration failed";
+    throw new Error(backupPath
+      ? `${detail}. The pre-migration database is preserved at ${backupPath}; restore it before retrying this update.`
+      : `${detail}. No prior database existed to restore.`);
+  }
 }
 
 export class StorageDatabase {
@@ -368,8 +441,7 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
   async initialize(): Promise<void> {
     await this.enqueue(async () => {
       if (this.database) return;
-      await prepareDatabasePath(this.pathname);
-      this.database = new StorageDatabase(this.pathname);
+      this.database = await openDatabaseWithRecovery(this.pathname);
     });
   }
 
@@ -609,6 +681,5 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 }
 
 export async function prepareWorkerDatabase(pathname: string): Promise<StorageDatabase> {
-  await prepareDatabasePath(pathname);
-  return new StorageDatabase(pathname);
+  return openDatabaseWithRecovery(pathname);
 }

@@ -3314,6 +3314,28 @@ button.settings-row:hover {
   animation: spin 900ms linear infinite;
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  color: var(--text-soft);
+  font-size: 10px;
+}
+.update-banner > div { display: grid; gap: 4px; }
+.update-banner strong { color: var(--text); font-size: 11px; }
+.update-banner span { line-height: 1.4; }
+.update-banner ul { margin: 1px 0 0; padding-left: 16px; color: var(--warning); }
+.update-banner nav { display: flex; flex: 0 0 auto; gap: 6px; }
+.update-banner button { min-height: 30px; padding-inline: 10px; font-size: 10px; }
+.update-banner button.primary { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+.update-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

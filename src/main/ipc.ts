@@ -186,6 +186,13 @@ export function registerIpc(controller: MainController): void {
     if (typeof baselineId !== "string" || typeof candidateId !== "string") throw new Error("Invalid evaluation comparison");
     return controller.compareEvaluations(baselineId, candidateId);
   });
+  ipcMain.handle(IPC.updateCheck, () => controller.checkForUpdate());
+  ipcMain.handle(IPC.updateDownload, () => controller.downloadUpdate());
+  ipcMain.handle(IPC.updateInstall, () => controller.installUpdate());
+  ipcMain.handle(IPC.updateChannel, (_event, value) => {
+    if (value !== "stable" && value !== "beta") throw new Error("Invalid update channel");
+    return controller.setUpdateChannel(value);
+  });
   ipcMain.handle(IPC.externalOpen, async (_event, value) => {
     if (typeof value !== "string") throw new Error("Invalid URL");
     const url = new URL(value);

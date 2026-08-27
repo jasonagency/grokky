@@ -35,7 +35,7 @@ jobs:
         run: npm run verify
 
   package:
-    name: Package (${{ matrix.name }})
+    name: Development package, unsigned (${{ matrix.name }})
     if: github.event_name != 'pull_request'
     needs: verify
     strategy:
@@ -46,14 +46,22 @@ jobs:
             os: macos-14
             command: npm run package:mac
             check: npm run verify:package:mac
-            artifact: release/*.dmg
+            artifact: |
+              release/*.dmg
+              release/*.zip
+              release/*.yml
           - name: Windows-x64
             os: windows-2022
             command: npm run package:win
             check: npm run verify:package:win
-            artifact: release/*.exe
+            artifact: |
+              release/*.exe
+              release/*.blockmap
+              release/*.yml
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,7 +75,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build package
+      - name: Build unsigned development package
         run: ${{ matrix.command }}
 
       - name: Verify packaged Codex runtime

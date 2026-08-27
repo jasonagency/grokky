@@ -13,9 +13,11 @@ describe("StateStore", () => {
     const state = defaultPersistentState(directory);
     state.settings.theme = "dark";
     state.settings.accentPalette = "electric-blue";
+    state.settings.updateChannel = "beta";
     await store.save(state);
     expect((await store.load()).settings.theme).toBe("dark");
     expect((await store.load()).settings.accentPalette).toBe("electric-blue");
+    expect((await store.load()).settings.updateChannel).toBe("beta");
     expect((await store.load()).computerAccess).toMatchObject({ enabled: true, grants: { files: "allow", commands: "ask" } });
     expect((await stat(sqlitePathForLegacy(pathname))).mode & 0o777).toBe(0o600);
     await store.close();

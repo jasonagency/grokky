@@ -26,6 +26,7 @@ import { MailboxService } from "./team/mailbox-service";
 import { MemoryService } from "./team/memory-service";
 import { RoutineService } from "./team/routine-service";
 import { ScreenSessionManager } from "../runner/screen-session-manager";
+import { createElectronUpdateAdapter, DisabledUpdateAdapter, UpdateService } from "./update-service";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
@@ -94,6 +95,13 @@ app.whenReady().then(async () => {
   const electronSecrets = createElectronComputerSecrets();
   const controlPlane = new ControlPlaneService(database);
   const teamRepository = new TeamRepository(database);
+  const updateAdapter = app.isPackaged
+    ? await createElectronUpdateAdapter("jasonagency/grokky")
+    : new DisabledUpdateAdapter();
+  const updates = new UpdateService(updateAdapter, {
+    currentVersion: app.getVersion(),
+    getRestartBlockers: () => mainController?.updateRestartBlockers() ?? ["Application startup is still in progress"],
+  });
   const screenSessions = new ScreenSessionManager([], Date.now, 5 * 60_000, (audit) => { void controlPlane.record({ aggregateId: audit.leaseId, source: "screen-session", type: "screen.recorded", payload: { audit } }).catch(() => undefined); });
   const controller = new MainController(
     stateStore,
@@ -119,6 +127,7 @@ app.whenReady().then(async () => {
     new MailboxService(teamRepository),
     new MemoryService(teamRepository),
     new RoutineService(teamRepository),
+    updates,
   );
   mainController = controller;
   await controller.initialize();
@@ -146,7 +155,23 @@ app.whenReady().then(async () => {
       if (process.env.GROKKY_SMOKE_SCREENSHOT_PATH) {
         const smokeView = process.env.GROKKY_SMOKE_VIEW;
         const smokeConversationCount = controller.snapshot().conversations.length;
-        if (smokeView === "light-theme") {
+        if (smokeView === "update-banner") {
+          const snapshot = controller.snapshot();
+          snapshot.update = {
+            status: "blocked",
+            channel: "stable",
+            info: {
+              version: "9.4.0",
+              channel: "stable",
+              releaseName: "Grokky 9.4",
+              releaseUrl: "https://github.com/jasonagency/grokky/releases/tag/v9.4.0",
+              files: [{ url: "https://github.com/jasonagency/grokky/releases/download/v9.4.0/Grokky.dmg", sha512: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" }],
+            },
+            blockers: ["1 local conversation is still running", "1 workspace integration is unresolved"],
+          };
+          mainWindow.webContents.send(IPC.snapshotChanged, snapshot);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } else if (smokeView === "light-theme") {
           await mainWindow.webContents.executeJavaScript(`document.documentElement.dataset.theme = 'light'`);
         } else if (smokeView === "session-delete") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('.session-delete')?.focus()`);

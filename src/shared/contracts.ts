@@ -211,6 +211,7 @@ export interface AppSettings {
   recentWorkingDirectories: string[];
   openRouterCredentialPath: string;
   theme: "system" | "light" | "dark";
+  updateChannel?: UpdateChannel;
   accentPalette?: AccentPalette;
   multiAgentEnabled: boolean;
   maxAgentThreads: number;
@@ -329,6 +330,34 @@ export interface ProviderStatus {
   detail: string;
 }
 
+export type UpdateChannel = "stable" | "beta";
+export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "downloaded" | "blocked" | "error";
+
+export interface UpdateFileInfo {
+  url: string;
+  sha512: string;
+  size?: number;
+}
+
+export interface UpdateReleaseInfo {
+  version: string;
+  channel: UpdateChannel;
+  releaseName?: string;
+  releaseNotes?: string;
+  releaseUrl?: string;
+  publishedAt?: string;
+  files: UpdateFileInfo[];
+}
+
+export interface UpdateSnapshot {
+  status: UpdateStatus;
+  channel: UpdateChannel;
+  info?: UpdateReleaseInfo;
+  progress?: { percent: number; transferred: number; total: number };
+  blockers: string[];
+  error?: string;
+}
+
 export interface AppSnapshot {
   conversations: Conversation[];
   activeConversationId?: string;
@@ -340,6 +369,7 @@ export interface AppSnapshot {
   workspaceState?: WorkspaceStateSnapshot;
   controlRuntime?: ControlRuntimeSnapshot;
   team?: TeamStateSnapshot;
+  update?: UpdateSnapshot;
   appVersion: string;
 }
 
@@ -408,6 +438,10 @@ export interface GrokkyApi {
   promoteEvaluation(input: { id: string; name: string; trace: TraceBundle; expectedOutcome: string; allowedSideEffects?: string[]; verificationRules: EvalVerificationRule[] }): Promise<EvalStateSnapshot>;
   gradeEvaluation(caseId: string, version: number, trace: TraceBundle, metrics: EvalMetricSet): Promise<EvalStateSnapshot>;
   compareEvaluations(baselineId: string, candidateId: string): Promise<EvalComparisonResult>;
+  checkForUpdate(): Promise<void>;
+  downloadUpdate(): Promise<void>;
+  installUpdate(): Promise<string[]>;
+  setUpdateChannel(channel: UpdateChannel): Promise<void>;
   openExternal(url: string): Promise<void>;
   onSnapshot(listener: (snapshot: AppSnapshot) => void): void;
   onProjection(listener: (change: ProjectionChange) => void): void;
@@ -469,6 +503,10 @@ export const IPC = {
   evalPromote: "grokky:quality:eval-promote",
   evalGrade: "grokky:quality:eval-grade",
   evalCompare: "grokky:quality:eval-compare",
+  updateCheck: "grokky:update:check",
+  updateDownload: "grokky:update:download",
+  updateInstall: "grokky:update:install",
+  updateChannel: "grokky:update:channel",
   externalOpen: "grokky:external:open",
 } as const;
 

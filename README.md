@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/earlyaidopters/grokky/actions/workflows/verify.yml"><img alt="Verify" src="https://github.com/earlyaidopters/grokky/actions/workflows/verify.yml/badge.svg" /></a>
+  <a href="https://github.com/jasonagency/grokky/actions/workflows/verify.yml"><img alt="Verify" src="https://github.com/jasonagency/grokky/actions/workflows/verify.yml/badge.svg" /></a>
   <img alt="Repository visibility" src="https://img.shields.io/badge/repository-public-2ea44f?style=flat-square" />
   <img alt="Electron" src="https://img.shields.io/badge/Electron-43-47848f?style=flat-square&logo=electron&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6-3178c6?style=flat-square&logo=typescript&logoColor=white" />
@@ -101,7 +101,8 @@ Grokky keeps them visible and independently configurable. A conversation records
 | Computer access | Gate files, commands, public web pages, and supported native controls |
 | Remote computer | Pair a bounded runner over a private network, with encrypted bearer-token storage |
 | Safety | Block credential files, path traversal, symlinks, private-network browser targets, and unsafe commands |
-| Persistence | Atomically store sessions, settings, audit history, usage, and resumable Codex thread IDs |
+| Persistence | Store sessions, task graphs, worktrees, traces, teams, audit history, and resumable harness references in SQLite |
+| Updates | Check stable or beta releases automatically, verify integrity, and wait for a safe restart checkpoint |
 | Appearance | System, dark, and light themes plus lime, electric blue, ultraviolet, amber, and ice accents |
 
 ## Provider capability matrix
@@ -170,15 +171,13 @@ The renderer, providers, persistence, workspace tools, web research, agent orche
 
 Packaged users do not need Node.js or npm. They only need credentials for at least one provider.
 
-1. Open the repository's [Verify workflow](https://github.com/earlyaidopters/grokky/actions/workflows/verify.yml).
-2. Open the newest green run on `main`.
-3. Download one artifact from the **Artifacts** section:
-   - `Grokky-macOS-arm64`
-   - `Grokky-Windows-x64`
-4. Unzip the downloaded artifact.
+1. Open the repository's [Releases page](https://github.com/jasonagency/grokky/releases).
+2. Choose the newest stable release, or a beta only if you intend to test prerelease behavior.
+3. Download the installer for macOS arm64 or Windows x64.
+4. Verify the file against the release's `SHA256SUMS` manifest and GitHub build-provenance attestation.
 5. Install the platform package below.
 
-Workflow artifacts are retained for 14 days. If an older artifact has expired, use the newest successful run or push a new commit to produce fresh packages.
+The tag-triggered release workflow signs both native packages, notarizes and staples the macOS package, verifies Windows Authenticode, checks updater metadata, and publishes checksums and provenance. Artifacts from the ordinary Verify workflow are unsigned development packages and are not a distribution channel.
 
 ### macOS installation
 
@@ -193,7 +192,7 @@ Workflow artifacts are retained for 14 days. If an older artifact has expired, u
 3. Launch Grokky from the Start menu or the selected directory.
 
 > [!WARNING]
-> Current packages are unsigned development builds. macOS Gatekeeper or Windows SmartScreen may warn before launch. Do not bypass an operating-system warning unless you trust the repository, the workflow run, and the exact commit that produced the artifact. Public distribution should use signed and notarized packages.
+> Do not install an operating-system warning exception for an unsigned development artifact. Distribution releases must pass the signed release workflow.
 
 ## First-run checklist
 
@@ -220,7 +219,7 @@ New installs start in **No project**, an isolated `~/.grokky/no-project` scratch
 ### Install and run
 
 ```bash
-git clone git@github.com:earlyaidopters/grokky.git
+git clone git@github.com:jasonagency/grokky.git
 cd grokky
 npm ci
 npm run dev
@@ -449,7 +448,7 @@ The included runner exposes only bounded workspace tools. It has no model creden
 On the computer to control:
 
 ```bash
-git clone git@github.com:earlyaidopters/grokky.git
+git clone git@github.com:jasonagency/grokky.git
 cd grokky
 npm ci
 npm run runner -- \
@@ -482,25 +481,32 @@ The database contains conversations, messages, activity summaries, settings, usa
 
 On first launch after this migration, Grokky imports `conversations.json` once, preserves it unchanged, and creates `conversations.json.legacy-v2-backup`. The SQLite import marker prevents a later launch from importing the same records again.
 
+Before opening an existing SQLite database, Grokky writes `conversations.sqlite3.pre-migration-backup` with private permissions. A failed migration leaves the original transaction intact and reports that recovery path instead of starting with empty state.
+
 Deleting a chat from the sidebar or toolbar removes it from that local state and cancels an active run first. Deleting local metadata does not delete a provider's remote records, Codex home data, agent TOML files, or workspace files.
 
 To back up Grokky, close the app and copy `conversations.sqlite3` plus any retained legacy backup to a protected location. Treat the backup as sensitive because it can contain prompts, responses, paths, audit records, and encrypted runner credentials. Removing the application does not automatically delete this per-user state.
 
 ## Updating
 
-Grokky does not currently include an automatic updater. Download the newest artifact from the latest green `main` workflow run and replace or reinstall the application. Conversation state lives outside the application bundle, so an ordinary update preserves sessions and settings. Back up `conversations.sqlite3` before changing versions when the local history matters.
+Signed packaged builds check the selected stable or beta channel automatically. Grokky never downloads or restarts without an operator action. Before presenting an installer for restart it requires a newer matching-channel version, HTTPS metadata, a valid SHA-512 digest, and the platform's application-owner signature validation.
+
+An update may download while work continues. Restart stays blocked while a local conversation or task lease is active, an integration is unresolved, an approval is pending, database initialization is incomplete, or the selected remote host has not reconciled. The banner names every blocker and preserves the open conversation, composer, and task context.
+
+Desktop updates never update an agent host implicitly. Host packages use a separate backup, install, health-check, protocol-negotiation, and rollback sequence. Compatible minor protocol skew may continue. A major mismatch blocks new jobs while retaining export and recovery. See [Release operations](docs/RELEASING.md).
 
 ## Repository map
 
 ```text
 grokky/
-├── .github/workflows/verify.yml       macOS and Windows CI and package gate
+├── .github/workflows/                 verification and signed release gates
 ├── build/icon-mascot.png              active application icon
 ├── docs/
 │   ├── ARCHITECTURE.md                process, data, and orchestration design
 │   ├── CODEX-SDK.md                   Codex integration guide
 │   ├── DEVELOPMENT.md                 development and release workflow
 │   ├── OPENROUTER.md                  OpenRouter integration guide
+│   ├── RELEASING.md                   signing, publication, update, and rollback runbook
 │   └── SECURITY.md                    threat model and privacy boundary
 ├── scripts/
 │   ├── check-repository-hygiene.mjs   privacy and secret guard
@@ -534,7 +540,7 @@ npm run package:win:dir
 npm run package:win
 ```
 
-Artifacts are written under `release/` and are ignored by Git. Every push to `main` verifies and packages on native macOS arm64 and Windows x64 GitHub runners, checks that the correct Codex executable is present outside `app.asar`, and uploads both installers as workflow artifacts. Development packages are unsigned. External distribution requires the appropriate Apple Developer ID or Windows code-signing identity and a release-specific security review.
+Artifacts are written under `release/` and are ignored by Git. Every push to `main` verifies and packages on native macOS arm64 and Windows x64 GitHub runners, checks that the correct Codex executable is present outside `app.asar`, and uploads unsigned development installers. A matching version tag runs the separate signed release workflow, which requires platform signing credentials, notarization, updater metadata, checksums, provenance, and rollback evidence before stable publication.
 
 Package commands intentionally refuse to cross-build on the wrong operating system. Electron can produce a Windows shell on macOS, or a macOS shell on another host, while silently omitting the target-specific Codex executable. Native packaging plus the bundled-runtime check prevents an installer that launches but cannot run Codex.
 
@@ -550,7 +556,7 @@ npm run verify:package:mac
 npm run verify:package:win
 ```
 
-CI performs this inspection before uploading either installer. A package is not considered successful merely because Electron produced a DMG or EXE.
+CI performs this inspection before uploading either installer. Release CI additionally verifies the native signature, macOS notarization ticket, and matching updater metadata. A package is not considered successful merely because Electron produced a DMG or EXE.
 
 ## Troubleshooting
 
@@ -603,6 +609,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 - [OpenRouter integration](docs/OPENROUTER.md)
 - [Security and privacy](docs/SECURITY.md)
 - [Development and release workflow](docs/DEVELOPMENT.md)
+- [Release operations](docs/RELEASING.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Current boundaries
@@ -612,7 +619,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 - Codex skills, MCP servers, and connectors do not automatically become OpenRouter tools.
 - The remote runner supports bounded file and command capabilities, not remote screen or UI automation.
 - OpenRouter web research currently uses a dedicated research model constant before final synthesis.
-- Packaged development builds are unsigned and not notarized.
+- Verify-workflow packages are unsigned development artifacts; only tagged release-workflow packages are distributable.
 
 ## Independent implementation notice
 

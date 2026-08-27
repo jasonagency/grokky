@@ -331,6 +331,14 @@ summary:focus-visible,
     linear-gradient(90deg, color-mix(in srgb, var(--sidebar) 88%, transparent), color-mix(in srgb, var(--bg) 92%, transparent));
 }
 
+.workspace {
+  grid-template-rows: 64px auto minmax(0, 1fr) auto;
+}
+
+.update-banner-slot {
+  min-height: 0;
+}
+
 .message-scroll,
 .composer-wrap {
   position: relative;

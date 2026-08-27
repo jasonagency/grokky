@@ -14,6 +14,7 @@ Security claims here apply to the source in this repository. Unsigned local buil
 6. Keep local conversation state private to the operating-system user.
 7. Fail closed when a capability, target, credential, or native permission is unavailable.
 8. Never use the user's home directory as an implicit project. No-project sessions are rooted in an isolated Grokky scratch folder.
+9. Install an update only after channel, version direction, metadata integrity, checksum, native signature, and restart-safety checks pass.
 
 ## Assets
 
@@ -228,11 +229,15 @@ Agent-host frames are size-bounded, ordered, and authenticated. Protocol-major m
 
 The unauthenticated health endpoint returns device name, platform, root, and capabilities. This is acceptable on the intended private transport but is another reason not to expose the runner publicly.
 
+Remote hosts are not updated by the desktop updater. A host update must create a restorable backup, install one package, pass a health check, and negotiate the protocol before new work resumes. A failed health check or incompatible protocol major restores the backup. Major skew blocks new jobs while export and recovery remain available; compatible minor skew remains operational.
+
 ## Local persistence
 
 The main process sends persistence requests to a dedicated worker that owns one built-in SQLite connection. The database file uses mode `0600`, WAL journaling, foreign keys, forward-only transactional migrations, and serialized requests. The compatibility load path still normalizes expected fields, limits collection sizes, restores defaults, and converts stale active agent states to stopped.
 
 The first SQLite launch may read the previous `conversations.json` file. Grokky copies that source to a private legacy backup before importing a normalized snapshot and an import marker in one transaction. The source and backup remain recoverable if import or a later migration fails, and a completed marker prevents duplicate imports.
+
+Every existing SQLite database is copied to a mode `0600` pre-migration backup before it is opened by a newer application build. Schema changes still run in individual transactions. A migration error keeps the original database and backup, stops startup, and returns the backup path for explicit recovery. Grokky does not replace failed state with an empty database.
 
 Control-plane events use stable IDs and per-aggregate sequences. Duplicate IDs do not reapply a projection, and a sequence gap is stored as a bounded diagnostic rather than mutating live state. Renderer projection messages contain only bounded UI contracts and never database handles, worker commands, or credential sources. Event payloads larger than 48 KiB become SHA-256-addressed SQLite artifacts capped at 2 MiB with retention metadata; projection content is independently truncated before IPC delivery.
 
@@ -243,6 +248,18 @@ Codex App Server stdout accepts newline-delimited messages no larger than 2 MiB.
 Local state contains private information, including messages, workspace paths, provider selection, selected agents, activity details, audit targets, and remote endpoint metadata. It is not committed, but any local backup or device-management system may copy it.
 
 Deleting a conversation removes it from Grokky's state after cancelling active work. It does not securely erase prior filesystem blocks or copies held by backups, provider services, Codex home data, or workspace version history.
+
+## Release and update trust
+
+The ordinary Verify workflow produces unsigned development packages. Those packages are useful for CI and local testing, but they are not a distribution channel. Only an exact `v<package-version>` tag can enter the Signed release workflow.
+
+Release CI uses native macOS and Windows runners. macOS builds require a Developer ID identity, hardened runtime entitlements, Apple notarization, and stapled tickets. Windows builds require an Authenticode identity and configured publisher name. Packaging fails when the signing identity is absent. CI checks the bundled Codex native executable, native signatures, notarization ticket, updater metadata, and SHA-512 updater digest before it uploads an artifact. GitHub links a build-provenance attestation to the release subjects, and the release includes independent SHA-256 manifests.
+
+The updater runs only in packaged builds. It disables automatic download, automatic restart, downgrades, and unsigned web installers. Before an update is offered it validates a strictly newer semantic version, the selected stable or beta channel, HTTPS artifact locations, sizes, and SHA-512 metadata. Electron Updater validates the downloaded digest and native application-owner signature before Grokky marks the installer ready.
+
+Restart is an operator action. Grokky recalculates blockers at that moment and refuses to quit while local runs or task leases are active, integrations are queued or conflicted, approvals are pending, migrations are incomplete, or the selected host needs reconciliation. Opening release details uses the external-browser IPC boundary and does not navigate or reload the renderer, so unsent composer state and current task context remain intact.
+
+Stable publication requires evidence that the rollback runbook in `docs/RELEASING.md` was exercised. Signing keys and notarization credentials are GitHub environment secrets. They are never embedded in source, updater metadata, attestations, or application state.
 
 ## Installed capability risk
 

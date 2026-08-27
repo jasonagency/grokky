@@ -79,6 +79,7 @@ export function defaultPersistentState(homeDirectory: string): PersistentState {
       recentWorkingDirectories: [],
       openRouterCredentialPath: "",
       theme: "system",
+      updateChannel: "stable",
       accentPalette: "lime",
       multiAgentEnabled: true,
       maxAgentThreads: 4,
@@ -340,6 +341,7 @@ export function normalizePersistentState(
         ? settings.openRouterCredentialPath
         : "",
       theme: ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system",
+      updateChannel: settings.updateChannel === "beta" ? "beta" : "stable",
       accentPalette: typeof settings.accentPalette === "string"
         && ["lime", "electric-blue", "ultraviolet", "solar-amber", "ice"].includes(settings.accentPalette)
         ? settings.accentPalette as AppSettings["accentPalette"]

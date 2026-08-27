@@ -59,6 +59,7 @@ import type {
   SandboxMode,
   SkillCapability,
   McpToolClassification,
+  UpdateChannel,
 } from "../../shared/contracts";
 import type { EvalComparisonResult, EvalStateSnapshot, ReplayMode, ReplayResult, TraceBundle, TraceQuery, ProjectionChange } from "../../shared/control-plane-contracts";
 import { CODEX_MODELS } from "../../shared/contracts";
@@ -75,6 +76,7 @@ import { ReplayDialog } from "./features/traces/ReplayDialog";
 import { EvalDashboard } from "./features/evaluations/EvalDashboard";
 import { EvalComparison } from "./features/evaluations/EvalComparison";
 import { AgentComputerView } from "./features/computer/AgentComputerView";
+import { UpdateBanner } from "./features/updates/UpdateBanner";
 import type { ScreenLease } from "../../shared/remote-protocol";
 
 const OPENROUTER_SUGGESTIONS = [
@@ -132,6 +134,10 @@ const THEME_CHOICES: Array<SelectChoice<AppSnapshot["settings"]["theme"]>> = [
   { value: "system", label: "Follow system", detail: "Match your operating system automatically" },
   { value: "dark", label: "Dark", detail: "Grokky's cinematic workspace" },
   { value: "light", label: "Light", detail: "Bright, high-contrast workspace" },
+];
+const UPDATE_CHANNEL_CHOICES: Array<SelectChoice<UpdateChannel>> = [
+  { value: "stable", label: "Stable", detail: "Signed production releases" },
+  { value: "beta", label: "Beta", detail: "Signed prereleases for early testing" },
 ];
 const SIGNAL_PALETTES: Array<{ id: AccentPalette; label: string; detail: string }> = [
   { id: "lime", label: "Acid lime", detail: "Original Grokky signal" },
@@ -1394,6 +1400,11 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                 </div>
                 <SignalPalette value={snapshot.settings.accentPalette ?? "lime"} onChange={(accentPalette) => void patchSettings({ accentPalette })} />
                 <div className="settings-row">
+                  <span className="settings-copy"><strong>Update channel</strong><small>Grokky checks automatically. You choose when to download and restart.</small></span>
+                  <SelectMenu value={snapshot.update?.channel ?? "stable"} choices={UPDATE_CHANNEL_CHOICES} label="Update channel" disabled={!snapshot.update} onChange={(channel) => void window.grokky.setUpdateChannel(channel).catch((error) => onError(error.message))} />
+                  <button type="button" disabled={!snapshot.update} onClick={() => void window.grokky.checkForUpdate().catch((error) => onError(error.message))}>Check now</button>
+                </div>
+                <div className="settings-row">
                   <span className="settings-copy"><strong>Workspace permission</strong><small>Control whether Grokky can edit files.</small></span>
                   <SelectMenu value={conversation.sandboxMode} choices={SANDBOX_CHOICES} label="Workspace permission" disabled={conversation.status === "running"} onChange={(sandboxMode) => void patchConversation({ sandboxMode })} />
                 </div>
@@ -1924,6 +1935,17 @@ export function App() {
             </div>
           </div>
         </header>
+
+        <div className="update-banner-slot">
+          <UpdateBanner
+            update={snapshot.update}
+            onDownload={() => window.grokky.downloadUpdate()}
+            onInstall={() => window.grokky.installUpdate()}
+            onCheck={() => window.grokky.checkForUpdate()}
+            onOpenDetails={(url) => window.grokky.openExternal(url)}
+            onError={setUiError}
+          />
+        </div>
 
         <MessageList conversation={active} agents={agents} />
         <Composer conversation={active} agents={agents} recentDirectories={snapshot.settings.recentWorkingDirectories} multiAgentEnabled={snapshot.settings.multiAgentEnabled} maxAgents={snapshot.settings.maxAgentThreads} webSearchEnabled={snapshot.settings.webSearchEnabled} onOpenAgents={() => setSettingsTab("agents")} onError={setUiError} />

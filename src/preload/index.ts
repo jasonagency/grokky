@@ -69,6 +69,10 @@ const api: GrokkyApi = {
   promoteEvaluation: (input) => invoke(IPC.evalPromote, input),
   gradeEvaluation: (caseId, version, trace, metrics) => invoke(IPC.evalGrade, caseId, version, trace, metrics),
   compareEvaluations: (baselineId, candidateId) => invoke(IPC.evalCompare, baselineId, candidateId),
+  checkForUpdate: () => invoke(IPC.updateCheck),
+  downloadUpdate: () => invoke(IPC.updateDownload),
+  installUpdate: () => invoke(IPC.updateInstall),
+  setUpdateChannel: (channel) => invoke(IPC.updateChannel, channel),
   openExternal: (url) => invoke(IPC.externalOpen, url),
   onSnapshot: (listener: (snapshot: AppSnapshot) => void) => {
     if (snapshotListener) ipcRenderer.removeListener(IPC.snapshotChanged, snapshotListener);

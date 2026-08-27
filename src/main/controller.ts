@@ -59,6 +59,7 @@ import type { AgentRuntimeService } from "./team/agent-runtime-service";
 import type { MailboxService } from "./team/mailbox-service";
 import type { MemoryService } from "./team/memory-service";
 import type { RoutineService } from "./team/routine-service";
+import type { UpdateService } from "./update-service";
 
 function id(): string {
   return randomUUID().replaceAll("-", "");
@@ -107,6 +108,8 @@ export class MainController {
   private readonly capabilities: CapabilitiesService;
   private readonly agents: AgentService;
   private unsubscribeProjection?: () => void;
+  private unsubscribeUpdate?: () => void;
+  private initialized = false;
 
   constructor(
     private readonly store: StateStore,
@@ -128,6 +131,7 @@ export class MainController {
     private readonly mailbox?: MailboxService,
     private readonly memories?: MemoryService,
     private readonly routines?: RoutineService,
+    private readonly updates?: UpdateService,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -155,6 +159,11 @@ export class MainController {
     if (this.routines) this.routineTimer = setInterval(() => { void this.dispatchDueRoutines().catch(() => undefined); }, 60_000);
     await this.refreshProviderStatuses(false);
     await this.store.save(this.state);
+    this.initialized = true;
+    if (this.updates) {
+      this.unsubscribeUpdate = this.updates.subscribe(() => this.publishSnapshot());
+      await this.updates.initialize(this.state.settings.updateChannel ?? "stable");
+    }
   }
 
   attachWindow(window: BrowserWindow): void {
@@ -170,6 +179,9 @@ export class MainController {
     if (this.routineTimer) clearInterval(this.routineTimer);
     this.unsubscribeProjection?.();
     this.unsubscribeProjection = undefined;
+    this.unsubscribeUpdate?.();
+    this.unsubscribeUpdate = undefined;
+    this.updates?.shutdown();
     for (const run of this.runs.values()) run.abort();
     await Promise.allSettled(this.runTasks.values());
     await this.harnessRegistry.cleanup();
@@ -190,6 +202,7 @@ export class MainController {
       workspaceState: this.workspaceLeases?.snapshot() ?? { revision: 0, leases: [], integrations: [] },
       controlRuntime: this.steering?.snapshot(),
       team: this.teamRuntime?.snapshot(),
+      update: this.updates?.snapshot(),
       appVersion: this.appVersion,
     });
   }
@@ -269,6 +282,47 @@ export class MainController {
   compareEvaluations(baselineId: string, candidateId: string) {
     if (!this.evaluations) throw new Error("Evaluation service is not available");
     return this.evaluations.compare(baselineId, candidateId);
+  }
+
+  async checkForUpdate(): Promise<void> {
+    if (!this.updates) throw new Error("Automatic updates are not available");
+    await this.updates.checkForUpdates();
+  }
+
+  async downloadUpdate(): Promise<void> {
+    if (!this.updates) throw new Error("Automatic updates are not available");
+    await this.updates.downloadUpdate();
+  }
+
+  async installUpdate(): Promise<string[]> {
+    if (!this.updates) throw new Error("Automatic updates are not available");
+    return this.updates.installUpdate();
+  }
+
+  async setUpdateChannel(channel: "stable" | "beta"): Promise<void> {
+    if (!this.updates) throw new Error("Automatic updates are not available");
+    await this.updates.setChannel(channel);
+    this.state.settings.updateChannel = channel;
+    await this.store.save(this.state);
+    this.publishSnapshot();
+  }
+
+  updateRestartBlockers(): string[] {
+    const blockers: string[] = [];
+    if (!this.initialized) blockers.push("Database migrations are still running");
+    const activeConversations = this.state?.conversations.filter((conversation) => conversation.status === "running").length ?? 0;
+    if (activeConversations) blockers.push(`${activeConversations} local conversation${activeConversations === 1 ? " is" : "s are"} still running`);
+    const tasks = this.taskScheduler?.snapshot().tasks ?? [];
+    const activeTasks = tasks.filter((task) => task.status === "leased" || task.status === "running").length;
+    if (activeTasks) blockers.push(`${activeTasks} task${activeTasks === 1 ? " has" : "s have"} an active execution lease`);
+    const integrations = this.workspaceLeases?.snapshot().integrations ?? [];
+    const unresolvedIntegrations = integrations.filter((entry) => new Set(["queued", "integrating", "conflict"]).has(entry.status)).length;
+    if (unresolvedIntegrations) blockers.push(`${unresolvedIntegrations} workspace integration${unresolvedIntegrations === 1 ? " is" : "s are"} unresolved`);
+    if (this.pendingApprovals.length) blockers.push(`${this.pendingApprovals.length} operator approval${this.pendingApprovals.length === 1 ? " is" : "s are"} pending`);
+    const access = this.state ? this.computerAccess.snapshot(this.state.computerAccess, this.activeWorkingDirectory(), this.pendingApprovals[0]) : undefined;
+    const remote = access?.devices.find((device) => device.id === access.activeDeviceId && device.kind === "remote");
+    if (remote?.status === "offline" && activeTasks > 0) blockers.push("The selected remote host has not reconciled its active task state");
+    return blockers;
   }
 
   async routeTask(taskId: string): Promise<RouteDecision> {

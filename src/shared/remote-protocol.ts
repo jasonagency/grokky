@@ -70,6 +70,32 @@ export interface RemoteReconciliationState {
   diagnostics: Array<{ cursor: number; jobId: string; detail: string }>;
 }
 
+export interface RemoteCompatibility {
+  newJobsAllowed: boolean;
+  exportAllowed: true;
+  recoveryAllowed: true;
+  reason: string;
+}
+
+export function assessRemoteCompatibility(remote: { major: number; minor: number }): RemoteCompatibility {
+  if (remote.major !== REMOTE_PROTOCOL.major) {
+    return {
+      newJobsAllowed: false,
+      exportAllowed: true,
+      recoveryAllowed: true,
+      reason: `Remote protocol ${remote.major}.${remote.minor} is incompatible with ${REMOTE_PROTOCOL.major}.${REMOTE_PROTOCOL.minor}; new jobs are blocked while export and recovery remain available.`,
+    };
+  }
+  return {
+    newJobsAllowed: true,
+    exportAllowed: true,
+    recoveryAllowed: true,
+    reason: remote.minor === REMOTE_PROTOCOL.minor
+      ? "Desktop and host protocols match."
+      : `Compatible protocol skew (${REMOTE_PROTOCOL.major}.${REMOTE_PROTOCOL.minor} desktop, ${remote.major}.${remote.minor} host).`,
+  };
+}
+
 export type ScreenKind = "browser" | "desktop";
 export type ScreenController = "agent" | "operator" | "locked";
 export interface ScreenLease {
@@ -107,7 +133,8 @@ export function verifyRemoteFrame(frame: RemoteEventFrame, credential: string): 
 }
 
 export function assertCompatibleProtocol(remote: { major: number; minor: number }): void {
-  if (remote.major !== REMOTE_PROTOCOL.major) throw new Error(`Remote protocol ${remote.major}.${remote.minor} is incompatible with ${REMOTE_PROTOCOL.major}.${REMOTE_PROTOCOL.minor}`);
+  const compatibility = assessRemoteCompatibility(remote);
+  if (!compatibility.newJobsAllowed) throw new Error(compatibility.reason);
 }
 
 export function assertSecureRemoteEndpoint(endpoint: string): string {
