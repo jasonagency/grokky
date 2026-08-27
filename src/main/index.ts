@@ -8,6 +8,7 @@ import { registerIpc } from "./ipc";
 import { StateStore, sqlitePathForLegacy } from "./state-store";
 import { WorkerDatabaseClient } from "./storage/database-client";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
+import { TaskScheduler } from "./control-plane/scheduler";
 import { IPC } from "../shared/contracts";
 
 let mainWindow: BrowserWindow | null = null;
@@ -70,6 +71,8 @@ app.whenReady().then(async () => {
       secrets: createElectronComputerSecrets(),
     }),
     new ControlPlaneService(database),
+    undefined,
+    new TaskScheduler(database, { concurrency: 4, leaseDurationMs: 30_000 }),
   );
   mainController = controller;
   await controller.initialize();
@@ -298,6 +301,27 @@ app.whenReady().then(async () => {
             await mainWindow.webContents.executeJavaScript(`document.querySelector('.crew-picker-list > button:last-child')?.click()`);
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
+        } else if (smokeView === "task-graph") {
+          const suffix = Date.now().toString(36);
+          await controller.createTaskGoal({
+            id: `smoke-goal-${suffix}`,
+            title: "Ship durable orchestration",
+            objective: "Verify the queue is readable and operable after restart",
+            nodes: [
+              { id: `smoke-root-${suffix}`, title: "Recover active leases", description: "Reconcile the last checkpoint", priority: 8 },
+              { id: `smoke-child-${suffix}`, title: "Notify the operator", description: "Wait for recovery to succeed", dependsOn: [`smoke-root-${suffix}`], priority: 5 },
+            ],
+          });
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const taskGraphReady = await mainWindow.webContents.executeJavaScript(`(() => {
+            const graph = document.querySelector('[aria-label="Task graph and queue"]');
+            const first = graph?.querySelector('button.task-node-card');
+            if (!(first instanceof HTMLButtonElement)) return false;
+            first.focus();
+            return document.activeElement === first && graph?.querySelectorAll('[role="listitem"]').length === 2;
+          })()`);
+          if (!taskGraphReady) throw new Error("task graph smoke fixture was not keyboard-readable");
         } else if (smokeView === "agents" || smokeView === "agent-editor" || smokeView === "agent-select") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="agents"]')?.click()`);
           if (smokeView === "agent-editor" || smokeView === "agent-select") {

@@ -1,4 +1,4 @@
-import type { ProjectionChange } from "./control-plane-contracts";
+import type { ProjectionChange, TaskAction, TaskGoalDraft, TaskGraphSnapshot } from "./control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
 
 export type ProviderId = "codex" | "openrouter";
@@ -254,6 +254,7 @@ export interface AppSnapshot {
   providerStatuses: ProviderStatus[];
   harnesses: HarnessRegistryEntry[];
   computerAccess: ComputerAccessSnapshot;
+  taskGraph: TaskGraphSnapshot;
   appVersion: string;
 }
 
@@ -297,6 +298,8 @@ export interface GrokkyApi {
   revokeComputer(deviceId: string): Promise<void>;
   updateComputerNetworkAllowlist(domains: string[]): Promise<void>;
   resolveComputerApproval(id: string, decision: ComputerApprovalDecision): Promise<void>;
+  createTaskGoal(draft: TaskGoalDraft): Promise<void>;
+  actOnTask(taskId: string, action: TaskAction): Promise<void>;
   openExternal(url: string): Promise<void>;
   onSnapshot(listener: (snapshot: AppSnapshot) => void): void;
   onProjection(listener: (change: ProjectionChange) => void): void;
@@ -333,6 +336,8 @@ export const IPC = {
   computerRevoke: "grokky:computer:revoke",
   computerNetworkAllowlist: "grokky:computer:network-allowlist",
   computerApprovalResolve: "grokky:computer:approval-resolve",
+  taskGoalCreate: "grokky:tasks:goal-create",
+  taskAction: "grokky:tasks:action",
   externalOpen: "grokky:external:open",
 } as const;
 

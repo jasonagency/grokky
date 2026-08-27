@@ -66,6 +66,7 @@ import { botVariantAt, botVariantForIdentity, type BotVariant } from "./bot-iden
 import { ModelCombobox, SelectMenu, type SelectChoice } from "./Controls";
 import { activitiesForDisplay, type DisplayActivity } from "./activity-display";
 import { crewRunsForDisplay, crewRunStage, groupCrewCommunications } from "./crew-display";
+import { TaskControlRoom } from "./features/tasks/TaskControlRoom";
 
 const OPENROUTER_SUGGESTIONS = [
   "openai/gpt-5.2",
@@ -125,7 +126,7 @@ const SIGNAL_PALETTES: Array<{ id: AccentPalette; label: string; detail: string 
 
 type BotMood = "idle" | "thinking" | "working" | "success" | "error";
 type BotSize = "micro" | "xs" | "sm" | "md" | "lg" | "hero";
-type SettingsTab = "session" | "computer" | "skills" | "agents" | "mcp" | "connectors";
+type SettingsTab = "session" | "computer" | "tasks" | "skills" | "agents" | "mcp" | "connectors";
 
 const BOT_ASSETS: Record<BotVariant, string> = {
   lime: "./mascots/grokky-hero.png",
@@ -1196,6 +1197,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   const navItems: Array<{ id: SettingsTab; label: string; icon: typeof SlidersHorizontal }> = [
     { id: "session", label: "Session", icon: SlidersHorizontal },
     { id: "computer", label: "Computer access", icon: DesktopTower },
+    { id: "tasks", label: "Task graph", icon: ClockCounterClockwise },
     { id: "agents", label: "Agents", icon: UsersThree },
     { id: "skills", label: "Skills", icon: PuzzlePiece },
     { id: "mcp", label: "MCP servers", icon: PlugsConnected },
@@ -1203,8 +1205,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   ];
   const navGroups: Array<{ label: string; items: typeof navItems }> = [
     { label: "Workspace", items: navItems.slice(0, 2) },
-    { label: "Orchestration", items: navItems.slice(2, 4) },
-    { label: "Extensions", items: navItems.slice(4, 6) },
+    { label: "Orchestration", items: navItems.slice(2, 5) },
+    { label: "Extensions", items: navItems.slice(5) },
   ];
   const activeHarness = snapshot.harnesses.find((harness) => harness.id === conversation.harnessId)
     ?? snapshot.harnesses.find((harness) => harness.providerCompatibility.includes(conversation.provider));
@@ -1384,6 +1386,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                 </section>
               </div>
             )}
+
+            {tab === "tasks" && <TaskControlRoom snapshot={snapshot} onError={onError} />}
 
             {tab === "skills" && (
               <div className="settings-stack capability-stack">
@@ -1728,6 +1732,7 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
+          <button type="button" data-settings-tab="tasks" onClick={() => setSettingsTab("tasks")}><ClockCounterClockwise size={17} />Tasks</button>
           <button type="button" data-settings-tab="agents" onClick={() => setSettingsTab("agents")}><UsersThree size={17} />Crew</button>
           <button type="button" data-settings-tab="computer" onClick={() => setSettingsTab("computer")}><DesktopTower size={17} />Computer</button>
           <button type="button" data-settings-tab="skills" onClick={() => setSettingsTab("skills")}><PuzzlePiece size={17} />Skills & tools</button>

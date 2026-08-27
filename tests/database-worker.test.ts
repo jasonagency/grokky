@@ -13,7 +13,7 @@ describe("control-plane database", () => {
     await client.writeSnapshot('{"version":2,"marker":"first"}');
 
     expect(await client.readSnapshot()).toBe('{"version":2,"marker":"first"}');
-    expect(await client.inspect()).toMatchObject({ schemaVersion: 2, journalMode: "wal" });
+    expect(await client.inspect()).toMatchObject({ schemaVersion: 3, journalMode: "wal" });
     expect((await client.inspect()).tables).toEqual(expect.arrayContaining([
       "agents",
       "conversations",
@@ -27,6 +27,13 @@ describe("control-plane database", () => {
       "runs",
       "secrets_metadata",
       "settings",
+      "task_attempts",
+      "task_checkpoints",
+      "task_edges",
+      "task_goals",
+      "task_graph_state",
+      "task_leases",
+      "task_messages",
       "tasks",
     ]));
 

@@ -143,6 +143,72 @@ const migrations: Migration[] = [{
       CREATE INDEX event_diagnostics_aggregate_order ON event_diagnostics(aggregate_id, created_at);
     `);
   },
+}, {
+  version: 3,
+  apply(database) {
+    database.exec(`
+      CREATE TABLE task_graph_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE task_goals (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE task_edges (
+        task_id TEXT NOT NULL,
+        depends_on_task_id TEXT NOT NULL,
+        PRIMARY KEY (task_id, depends_on_task_id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE task_attempts (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE task_leases (
+        task_id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE task_checkpoints (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE task_messages (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX task_attempts_task_order ON task_attempts(task_id, created_at);
+      CREATE INDEX task_checkpoints_task_order ON task_checkpoints(task_id, created_at);
+      CREATE INDEX task_messages_task_order ON task_messages(task_id, created_at);
+      CREATE INDEX task_leases_expiry ON task_leases(expires_at);
+    `);
+  },
 }];
 
 export function applyMigrations(database: DatabaseSync): number[] {

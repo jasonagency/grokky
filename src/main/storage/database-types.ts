@@ -11,6 +11,8 @@ export interface ControlPlaneDatabase {
   initialize(): Promise<void>;
   readSnapshot(): Promise<string | null>;
   writeSnapshot(snapshot: string): Promise<void>;
+  readTaskGraph(): Promise<string | null>;
+  writeTaskGraph(snapshot: string): Promise<void>;
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean>;
   appendEvent(request: StoredEventAppend): Promise<EventAppendResult>;
   listEvents(): Promise<string[]>;
@@ -25,6 +27,8 @@ export type DatabaseCommand =
   | { type: "initialize" }
   | { type: "read_snapshot" }
   | { type: "write_snapshot"; snapshot: string }
+  | { type: "read_task_graph" }
+  | { type: "write_task_graph"; snapshot: string }
   | { type: "import_legacy_snapshot"; snapshot: string; source: string; importedAt: number }
   | { type: "append_event"; request: StoredEventAppend }
   | { type: "list_events" }

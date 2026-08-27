@@ -27,9 +27,11 @@ import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
 import { capabilityForTool, ComputerAccessService, newAuditId, targetForTool, type ComputerToolName } from "./computer-access";
 import type { ProviderEvent } from "./providers/types";
-import type { ControlPlaneEventType } from "../shared/control-plane-contracts";
+import type { ControlPlaneEventType, TaskAction, TaskGoalDraft } from "../shared/control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
+import { LeaseReconciler } from "./control-plane/lease-reconciler";
+import type { TaskScheduler } from "./control-plane/scheduler";
 import { boundedConversationProjection } from "./control-plane/event-projector";
 import { communicationsFromOrchestrationEvent, mergeCrewCommunications } from "./crew-communications";
 import { createDefaultHarnessRegistry, HarnessRegistry } from "./harnesses/registry";
@@ -89,6 +91,7 @@ export class MainController {
     private readonly computerAccess = new ComputerAccessService(),
     private readonly controlPlane?: ControlPlaneService,
     private readonly harnessRegistry: HarnessRegistry = createDefaultHarnessRegistry(homeDirectory),
+    private readonly taskScheduler?: TaskScheduler,
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -97,6 +100,10 @@ export class MainController {
   async initialize(): Promise<void> {
     this.state = await this.store.load();
     await this.controlPlane?.initialize({ conversations: this.state.conversations });
+    if (this.taskScheduler) {
+      await this.taskScheduler.initialize();
+      await new LeaseReconciler(this.taskScheduler).reconcileExpired();
+    }
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
     if (!this.state.conversations.length) this.createConversationInternal();
     await this.refreshProviderStatuses(false);
@@ -130,8 +137,21 @@ export class MainController {
       providerStatuses: this.statuses,
       harnesses: this.harnesses,
       computerAccess: this.computerAccess.snapshot(this.state.computerAccess, this.activeWorkingDirectory(), this.pendingApprovals[0]),
+      taskGraph: this.taskScheduler?.snapshot() ?? { revision: 0, goals: [], tasks: [] },
       appVersion: this.appVersion,
     });
+  }
+
+  async createTaskGoal(draft: TaskGoalDraft): Promise<void> {
+    if (!this.taskScheduler) throw new Error("The task scheduler is not available");
+    await this.taskScheduler.createGoal(draft);
+    this.publishSnapshot();
+  }
+
+  async actOnTask(taskId: string, action: TaskAction): Promise<void> {
+    if (!this.taskScheduler) throw new Error("The task scheduler is not available");
+    await this.taskScheduler.applyAction(taskId, action);
+    this.publishSnapshot();
   }
 
   async createConversation(): Promise<string> {

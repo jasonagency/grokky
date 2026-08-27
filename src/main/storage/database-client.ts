@@ -54,6 +54,39 @@ export class StorageDatabase {
     this.transaction(() => this.writeSnapshotRow(snapshot));
   }
 
+  readTaskGraph(): string | null {
+    const row = this.database.prepare("SELECT payload FROM task_graph_state WHERE id = 1").get() as { payload?: unknown } | undefined;
+    return typeof row?.payload === "string" ? row.payload : null;
+  }
+
+  writeTaskGraph(snapshot: string): void {
+    const value = JSON.parse(snapshot) as import("../../shared/control-plane-contracts").TaskGraphSnapshot;
+    if (!Number.isInteger(value.revision) || !Array.isArray(value.goals) || !Array.isArray(value.tasks)) throw new Error("Invalid task graph snapshot");
+    this.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO task_graph_state(id, revision, payload, updated_at) VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, payload = excluded.payload, updated_at = excluded.updated_at
+      `).run(value.revision, snapshot, Date.now());
+      this.database.exec("DELETE FROM task_messages; DELETE FROM task_checkpoints; DELETE FROM task_leases; DELETE FROM task_attempts; DELETE FROM task_edges; DELETE FROM tasks; DELETE FROM task_goals;");
+      const insertGoal = this.database.prepare("INSERT INTO task_goals(id, payload, created_at, updated_at) VALUES (?, ?, ?, ?)");
+      for (const goal of value.goals) insertGoal.run(goal.id, JSON.stringify(goal), goal.createdAt, goal.updatedAt);
+      const insertTask = this.database.prepare("INSERT INTO tasks(id, payload, created_at, updated_at) VALUES (?, ?, ?, ?)");
+      for (const task of value.tasks) insertTask.run(task.id, JSON.stringify(task), task.createdAt, task.updatedAt);
+      const insertEdge = this.database.prepare("INSERT INTO task_edges(task_id, depends_on_task_id) VALUES (?, ?)");
+      const insertAttempt = this.database.prepare("INSERT INTO task_attempts(id, task_id, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");
+      const insertLease = this.database.prepare("INSERT INTO task_leases(task_id, lease_id, payload, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)");
+      const insertCheckpoint = this.database.prepare("INSERT INTO task_checkpoints(id, task_id, payload, created_at) VALUES (?, ?, ?, ?)");
+      const insertMessage = this.database.prepare("INSERT INTO task_messages(id, task_id, payload, created_at) VALUES (?, ?, ?, ?)");
+      for (const task of value.tasks) {
+        for (const dependency of task.dependsOn) insertEdge.run(task.id, dependency);
+        for (const attempt of task.attempts) insertAttempt.run(attempt.id, task.id, JSON.stringify(attempt), attempt.startedAt, attempt.completedAt ?? attempt.startedAt);
+        if (task.lease) insertLease.run(task.id, task.lease.id, JSON.stringify(task.lease), task.lease.expiresAt, task.lease.heartbeatAt);
+        for (const checkpoint of task.checkpoints) insertCheckpoint.run(checkpoint.id, task.id, JSON.stringify(checkpoint), checkpoint.createdAt);
+        for (const message of task.messages) insertMessage.run(message.id, task.id, JSON.stringify(message), message.createdAt);
+      }
+    });
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): boolean {
     return this.transaction(() => {
       const marker = this.database.prepare("SELECT value FROM metadata WHERE key = ?").get("legacy_import_v2");
@@ -238,6 +271,14 @@ export class DirectDatabaseClient implements ControlPlaneDatabase {
     return this.enqueue(() => this.requireDatabase().writeSnapshot(snapshot));
   }
 
+  readTaskGraph(): Promise<string | null> {
+    return this.enqueue(() => this.requireDatabase().readTaskGraph());
+  }
+
+  writeTaskGraph(snapshot: string): Promise<void> {
+    return this.enqueue(() => this.requireDatabase().writeTaskGraph(snapshot));
+  }
+
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {
     return this.enqueue(() => this.requireDatabase().importLegacySnapshot(snapshot, source, importedAt));
   }
@@ -311,6 +352,14 @@ export class WorkerDatabaseClient implements ControlPlaneDatabase {
 
   writeSnapshot(snapshot: string): Promise<void> {
     return this.request({ type: "write_snapshot", snapshot }).then(() => undefined);
+  }
+
+  readTaskGraph(): Promise<string | null> {
+    return this.request({ type: "read_task_graph" });
+  }
+
+  writeTaskGraph(snapshot: string): Promise<void> {
+    return this.request({ type: "write_task_graph", snapshot }).then(() => undefined);
   }
 
   importLegacySnapshot(snapshot: string, source: string, importedAt: number): Promise<boolean> {

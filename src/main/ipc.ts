@@ -1,6 +1,7 @@
 import { dialog, ipcMain, shell } from "electron";
 import type { MainController } from "./controller";
 import { IPC } from "../shared/contracts";
+import { validateTaskAction, validateTaskGoalDraft, validateTaskId } from "./control-plane/task-graph";
 import {
   requireComputerAccessLevel,
   requireComputerApprovalDecision,
@@ -87,6 +88,11 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.computerApprovalResolve, (_event, approvalId, decision) => controller.resolveComputerApproval(
     requireId(approvalId, "approval ID"),
     requireComputerApprovalDecision(decision),
+  ));
+  ipcMain.handle(IPC.taskGoalCreate, (_event, draft) => controller.createTaskGoal(validateTaskGoalDraft(draft)));
+  ipcMain.handle(IPC.taskAction, (_event, taskId, action) => controller.actOnTask(
+    validateTaskId(taskId),
+    validateTaskAction(action),
   ));
   ipcMain.handle(IPC.externalOpen, async (_event, value) => {
     if (typeof value !== "string") throw new Error("Invalid URL");

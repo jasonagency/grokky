@@ -116,3 +116,125 @@ export type NewControlPlaneEvent = Omit<ControlPlaneEvent, "id" | "sequence" | "
   id?: string;
   timestamp?: number;
 };
+
+export type TaskGoalStatus = "active" | "paused" | "succeeded" | "failed" | "canceled";
+export type TaskNodeStatus = "blocked" | "queued" | "leased" | "running" | "paused" | "succeeded" | "failed" | "canceled";
+export type TaskAttemptStatus = "leased" | "running" | "succeeded" | "failed" | "interrupted" | "canceled";
+
+export interface TaskAssignment {
+  agentId?: string;
+  harnessId?: string;
+  model?: string;
+  requiredCapabilities?: string[];
+}
+
+export interface TaskAttempt {
+  id: string;
+  taskId: string;
+  number: number;
+  status: TaskAttemptStatus;
+  startedAt: number;
+  completedAt?: number;
+  error?: string;
+  recovery?: "expired-lease";
+}
+
+export interface TaskLease {
+  id: string;
+  taskId: string;
+  attemptId: string;
+  idempotencyKey: string;
+  acquiredAt: number;
+  heartbeatAt: number;
+  expiresAt: number;
+}
+
+export interface TaskCheckpoint {
+  id: string;
+  taskId: string;
+  attemptId: string;
+  cursor: string;
+  recoverable: boolean;
+  createdAt: number;
+}
+
+export interface TaskOutcome {
+  summary: string;
+  completedAt: number;
+  artifactIds?: string[];
+}
+
+export interface TaskMessage {
+  id: string;
+  text: string;
+  createdAt: number;
+  delivery: "queued";
+}
+
+export interface TaskGoal {
+  id: string;
+  title: string;
+  objective: string;
+  status: TaskGoalStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TaskNode {
+  id: string;
+  goalId: string;
+  title: string;
+  description: string;
+  status: TaskNodeStatus;
+  priority: number;
+  dependsOn: string[];
+  blockerChain: string[];
+  assignment: TaskAssignment;
+  maxAttempts: number;
+  attempts: TaskAttempt[];
+  lease?: TaskLease;
+  checkpoints: TaskCheckpoint[];
+  messages: TaskMessage[];
+  outcome?: TaskOutcome;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TaskGraphSnapshot {
+  revision: number;
+  goals: TaskGoal[];
+  tasks: TaskNode[];
+}
+
+export interface TaskNodeDraft {
+  id: string;
+  title: string;
+  description?: string;
+  priority?: number;
+  dependsOn?: string[];
+  assignment?: TaskAssignment;
+  maxAttempts?: number;
+}
+
+export interface TaskGoalDraft {
+  id: string;
+  title: string;
+  objective: string;
+  nodes: TaskNodeDraft[];
+}
+
+export type TaskAction =
+  | { type: "assign"; assignment: TaskAssignment }
+  | { type: "message"; text: string }
+  | { type: "reprioritize"; priority: number }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "cancel" }
+  | { type: "retry" }
+  | { type: "rewire"; dependsOn: string[] };
+
+export interface TaskLeaseClaim {
+  task: TaskNode;
+  lease: TaskLease;
+  checkpoint?: TaskCheckpoint;
+}

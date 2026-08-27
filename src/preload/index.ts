@@ -44,6 +44,8 @@ const api: GrokkyApi = {
   revokeComputer: (deviceId) => invoke(IPC.computerRevoke, deviceId),
   updateComputerNetworkAllowlist: (domains) => invoke(IPC.computerNetworkAllowlist, domains),
   resolveComputerApproval: (id, decision) => invoke(IPC.computerApprovalResolve, id, decision),
+  createTaskGoal: (draft) => invoke(IPC.taskGoalCreate, draft),
+  actOnTask: (taskId, action) => invoke(IPC.taskAction, taskId, action),
   openExternal: (url) => invoke(IPC.externalOpen, url),
   onSnapshot: (listener: (snapshot: AppSnapshot) => void) => {
     if (snapshotListener) ipcRenderer.removeListener(IPC.snapshotChanged, snapshotListener);
