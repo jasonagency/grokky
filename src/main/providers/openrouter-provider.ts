@@ -177,7 +177,7 @@ function toolsFor(context: OpenRouterRunContext, conversation: Conversation, rea
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters as never,
-        strict: true,
+        strict: false,
       },
     }));
   return [
