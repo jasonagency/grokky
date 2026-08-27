@@ -1,11 +1,6 @@
 import { resolve } from "node:path";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
-
-function within(pathname: string, root: string): boolean {
-  const candidate = resolve(pathname);
-  const base = resolve(root);
-  return candidate === base || candidate.startsWith(`${base}/`);
-}
+import { isPathWithin } from "../path-boundary";
 
 export async function createPiResourceLoader(options: {
   cwd: string;
@@ -23,7 +18,7 @@ export async function createPiResourceLoader(options: {
     additionalSkillPaths: selected,
     skillsOverride: (base) => ({
       diagnostics: base.diagnostics,
-      skills: base.skills.filter((skill) => selected.some((root) => within(skill.filePath, root))),
+      skills: base.skills.filter((skill) => selected.some((root) => isPathWithin(root, resolve(skill.filePath)))),
     }),
   });
   await loader.reload();

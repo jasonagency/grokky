@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { isPathWithin } from "../path-boundary";
 import { GitRepository } from "./git-repository";
 
 export interface ManagedWorktree {
@@ -40,7 +41,7 @@ export class WorktreeManager {
   private async createNamed(repository: GitRepository, branch: string, baseCommit: string, directoryName: string): Promise<ManagedWorktree> {
     const repositoryRoot = resolve(this.root, repository.id);
     const pathname = resolve(repositoryRoot, directoryName);
-    if (!pathname.startsWith(`${repositoryRoot}/`) && pathname !== repositoryRoot) throw new Error("Invalid worktree path");
+    if (!isPathWithin(repositoryRoot, pathname)) throw new Error("Invalid worktree path");
     await mkdir(repositoryRoot, { recursive: true });
     await repository.git(["worktree", "add", "-b", branch, "--", pathname, baseCommit]);
     await repository.git(["worktree", "lock", "--reason", "Grokky workspace lease", pathname]);

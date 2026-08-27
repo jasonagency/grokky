@@ -6,7 +6,7 @@ import { defaultPersistentState, noProjectDirectory, sqlitePathForLegacy, StateS
 import type { ControlPlaneDatabase } from "../src/main/storage/database-types";
 
 describe("StateStore", () => {
-  test("writes a private SQLite snapshot and reads it back", async () => {
+  test("writes a SQLite snapshot and reads it back", async () => {
     const directory = await mkdtemp(join(tmpdir(), "grokky-state-"));
     const pathname = join(directory, "state.json");
     const store = new StateStore(pathname, directory);
@@ -19,6 +19,14 @@ describe("StateStore", () => {
     expect((await store.load()).settings.accentPalette).toBe("electric-blue");
     expect((await store.load()).settings.updateChannel).toBe("beta");
     expect((await store.load()).computerAccess).toMatchObject({ enabled: true, grants: { files: "allow", commands: "ask" } });
+    await store.close();
+  });
+
+  test.skipIf(process.platform === "win32")("restricts SQLite snapshot permissions on POSIX", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "grokky-state-"));
+    const pathname = join(directory, "state.json");
+    const store = new StateStore(pathname, directory);
+    await store.load();
     expect((await stat(sqlitePathForLegacy(pathname))).mode & 0o777).toBe(0o600);
     await store.close();
   });
