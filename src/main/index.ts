@@ -15,6 +15,9 @@ import { ControlRuntimeRepository } from "./control-plane/control-runtime-reposi
 import { SteeringService } from "./control-plane/steering-service";
 import { NotificationService } from "./control-plane/notification-service";
 import { IPC } from "../shared/contracts";
+import { McpAuthManager } from "./tools/mcp-auth";
+import { McpClientManager } from "./tools/mcp-client-manager";
+import { ToolGateway } from "./tools/tool-gateway";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
@@ -62,9 +65,10 @@ async function createWindow(controller: MainController): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  const homeDirectory = process.env.GROKKY_SMOKE_HOME_PATH || app.getPath("home");
   const legacyStatePath = join(app.getPath("userData"), "conversations.json");
   const database = new WorkerDatabaseClient(sqlitePathForLegacy(legacyStatePath));
-  stateStore = new StateStore(legacyStatePath, app.getPath("home"), {
+  stateStore = new StateStore(legacyStatePath, homeDirectory, {
     database,
   });
   const worktreeRoot = join(app.getPath("userData"), "worktrees");
@@ -79,13 +83,14 @@ app.whenReady().then(async () => {
       return true;
     },
   });
+  const electronSecrets = createElectronComputerSecrets();
   const controller = new MainController(
     stateStore,
-    app.getPath("home"),
+    homeDirectory,
     app.getVersion(),
     new ComputerAccessService({
       host: createElectronComputerHost(join(app.getPath("temp"), "grokky-captures")),
-      secrets: createElectronComputerSecrets(),
+      secrets: electronSecrets,
     }),
     new ControlPlaneService(database),
     undefined,
@@ -94,6 +99,7 @@ app.whenReady().then(async () => {
     integrationQueue,
     steering,
     notifications,
+    new ToolGateway(new McpClientManager(new McpAuthManager(join(app.getPath("userData"), "mcp-auth.json"), electronSecrets))),
   );
   mainController = controller;
   await controller.initialize();
@@ -358,6 +364,11 @@ app.whenReady().then(async () => {
           }
         } else if (smokeView === "skills") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="skills"]')?.click()`);
+        } else if (smokeView === "mcp") {
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="skills"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-view="mcp"]')?.click()`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
         } else if (smokeView === "computer" || smokeView === "computer-pair") {
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="computer"]')?.click()`);
           if (smokeView === "computer-pair") {

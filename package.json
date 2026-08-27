@@ -1,7 +1,7 @@
 {
   "name": "grokky",
   "version": "0.1.2",
-  "description": "A local-first AI workspace powered by the Codex SDK and OpenRouter.",
+  "description": "A local-first multi-harness AI workspace powered by Codex, OpenRouter, and Pi.",
   "main": "./out/main/index.js",
   "author": "Early AI Dopters",
   "license": "UNLICENSED",
@@ -33,6 +33,7 @@
     "smoke:codex-web": "GROKKY_LIVE_CODEX_WEB=1 vitest run tests/codex-web.integration.test.ts",
     "smoke:multiagent": "node scripts/smoke-multiagent.mjs",
     "smoke:openrouter": "node scripts/smoke-openrouter.mjs",
+    "smoke:openrouter-mcp": "GROKKY_LIVE_OPENROUTER_MCP=1 vitest run tests/openrouter-mcp-live.integration.test.ts",
     "smoke:openrouter-crew": "GROKKY_LIVE_OPENROUTER_CREW=1 vitest run tests/openrouter-crew.integration.test.ts",
     "smoke:openrouter-web": "GROKKY_LIVE_OPENROUTER_WEB=1 vitest run tests/openrouter-web.integration.test.ts",
     "smoke:electron": "node scripts/smoke-electron.mjs",
@@ -40,6 +41,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@openai/codex-sdk": "^0.149.1",
     "@openrouter/sdk": "^1.2.57",
     "@phosphor-icons/react": "^2.1.10",
@@ -47,9 +49,12 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "smol-toml": "^1.8.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@types/node": "^22.19.19",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

@@ -10,7 +10,7 @@ export type OpenRouterCredentialResolver = (settings: ProviderRunContext["settin
 export class OpenRouterAdapter implements HarnessAdapter {
   readonly descriptor = {
     id: "openrouter-chat",
-    version: "compat-1",
+    version: "compat-2-mcp",
     displayName: "OpenRouter Chat",
     providerCompatibility: ["openrouter" as const],
     models: [{ id: "*", label: "OpenRouter model ID", dynamic: true }],
@@ -20,7 +20,7 @@ export class OpenRouterAdapter implements HarnessAdapter {
       steering: "none" as const,
       cancellation: true,
       tools: true,
-      mcp: false,
+      mcp: true,
       usage: "authoritative" as const,
       computerControl: true,
       multiAgent: true,

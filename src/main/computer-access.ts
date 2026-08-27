@@ -34,9 +34,10 @@ const capabilityCopy: Record<ComputerCapabilityId, Pick<ComputerCapability, "lab
   browser: { label: "Browser and web pages", description: "Open approved public web pages and return readable page content." },
   screen: { label: "Screen visibility", description: "Capture the current display so an agent can inspect visible application state." },
   automation: { label: "Application control", description: "Open apps, click coordinates, and type text through supported system accessibility controls." },
+  mcp: { label: "MCP tools", description: "Call enabled Model Context Protocol tools through Grokky's policy and audit gateway." },
 };
 
-const localCapabilities: ComputerCapabilityId[] = ["files", "commands", "browser", "screen", "automation"];
+const localCapabilities: ComputerCapabilityId[] = ["files", "commands", "browser", "screen", "automation", "mcp"];
 const workspaceTools = new Set<WorkspaceToolName>(["list_files", "search_files", "read_file", "create_file", "edit_file", "run_command"]);
 
 export function capabilityForTool(name: ComputerToolName): ComputerCapabilityId {
@@ -190,7 +191,7 @@ export class ComputerAccessService {
       ...capabilityCopy[id],
       level: state.grants[id],
       permission: activeRemote ? "not-required" : this.host.permissionStatus(id),
-      available: activeCapabilities.includes(id),
+      available: id === "mcp" || activeCapabilities.includes(id),
     }));
     const devices: ComputerDevice[] = [
       {
@@ -279,6 +280,7 @@ export class ComputerAccessService {
   }
 
   async test(state: PersistedComputerAccess, capability: ComputerCapabilityId, conversation: Conversation): Promise<string> {
+    if (capability === "mcp") return "MCP gateway policy is available in the Electron main process.";
     if (state.activeDeviceId !== state.localDeviceId) {
       const device = this.remoteDevice(state);
       const payload = await this.remoteRequest<{ ok: boolean; detail: string }>(device, "/test", { capability });

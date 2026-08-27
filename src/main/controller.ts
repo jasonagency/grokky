@@ -18,6 +18,7 @@ import type {
   ComputerCapabilityId,
   Conversation,
   ConversationPatch,
+  McpToolClassification,
   ProviderStatus,
   RunOutcome,
 } from "../shared/contracts";
@@ -44,6 +45,10 @@ import { boundedConversationProjection } from "./control-plane/event-projector";
 import { communicationsFromOrchestrationEvent, mergeCrewCommunications } from "./crew-communications";
 import { createDefaultHarnessRegistry, HarnessRegistry } from "./harnesses/registry";
 import { noProjectDirectory, StateStore, type PersistentState } from "./state-store";
+import { McpAuthManager } from "./tools/mcp-auth";
+import { McpClientManager } from "./tools/mcp-client-manager";
+import { ToolGateway } from "./tools/tool-gateway";
+import type { HarnessMcpTool } from "./providers/types";
 
 function id(): string {
   return randomUUID().replaceAll("-", "");
@@ -104,6 +109,7 @@ export class MainController {
     private readonly integrationQueue?: IntegrationQueue,
     private readonly steering?: SteeringService,
     private readonly notifications?: NotificationService,
+    private readonly toolGateway: ToolGateway = new ToolGateway(new McpClientManager(new McpAuthManager())),
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -140,6 +146,7 @@ export class MainController {
     for (const run of this.runs.values()) run.abort();
     await Promise.allSettled(this.runTasks.values());
     await this.harnessRegistry.cleanup();
+    await this.toolGateway.close();
   }
 
   snapshot(): AppSnapshot {
@@ -495,7 +502,42 @@ export class MainController {
   }
 
   async getCapabilities(): Promise<CapabilitiesSnapshot> {
-    return this.capabilities.snapshot(this.activeWorkingDirectory());
+    const [snapshot, configurations] = await Promise.all([
+      this.capabilities.snapshot(this.activeWorkingDirectory()),
+      this.capabilities.mcpServerConfigurations(),
+    ]);
+    return this.mergeMcpCapabilities(snapshot, configurations, this.toolGateway.cached().results);
+  }
+
+  async refreshMcpCapabilities(): Promise<CapabilitiesSnapshot> {
+    const [snapshot, configurations] = await Promise.all([
+      this.capabilities.snapshot(this.activeWorkingDirectory()),
+      this.capabilities.mcpServerConfigurations(),
+    ]);
+    const prepared = await this.toolGateway.prepare(configurations, this.state.settings.mcpToolPolicies ?? {});
+    return this.mergeMcpCapabilities(snapshot, configurations, prepared.results);
+  }
+
+  private mergeMcpCapabilities(
+    snapshot: CapabilitiesSnapshot,
+    configurations: Awaited<ReturnType<CapabilitiesService["mcpServerConfigurations"]>>,
+    results: ReturnType<ToolGateway["cached"]>["results"],
+  ): CapabilitiesSnapshot {
+    return {
+      ...snapshot,
+      mcpServers: snapshot.mcpServers.map((server) => {
+        const result = results.find((candidate) => candidate.serverId === server.id);
+        if (!server.enabled) return { ...server, status: "idle" as const, tools: [] };
+        if (!configurations.some((configuration) => configuration.id === server.id)) return { ...server, status: "error" as const, detail: "The MCP server transport configuration is unsupported.", tools: [] };
+        if (!result) return { ...server, status: "idle" as const, detail: "Refresh to discover tools through the main-process gateway.", tools: [] };
+        return {
+          ...server,
+          status: result.status,
+          ...(result.detail ? { detail: result.status === "authorization-required" ? "Authorization is required." : "Connection failed; inspect the main-process diagnostic log." } : {}),
+          tools: result.tools.map(({ serverId: _server, originalName: _original, inputSchema: _schema, toolDefinition: _definition, ...tool }) => tool),
+        };
+      }),
+    };
   }
 
   async setSkillEnabled(pathname: string, enabled: boolean): Promise<CapabilitiesSnapshot> {
@@ -503,7 +545,33 @@ export class MainController {
   }
 
   async setMcpEnabled(id: string, enabled: boolean): Promise<CapabilitiesSnapshot> {
-    return this.capabilities.setMcpEnabled(id, enabled, this.activeWorkingDirectory());
+    await this.capabilities.setMcpEnabled(id, enabled, this.activeWorkingDirectory());
+    return this.refreshMcpCapabilities();
+  }
+
+  async setMcpToolClassification(name: string, classification: McpToolClassification): Promise<CapabilitiesSnapshot> {
+    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(name)) throw new Error("Invalid MCP tool name");
+    if (!new Set<McpToolClassification>(["read", "write", "external-side-effect", "human-only"]).has(classification)) throw new Error("Invalid MCP tool classification");
+    this.state.settings.mcpToolPolicies = { ...(this.state.settings.mcpToolPolicies ?? {}), [name]: classification };
+    await this.commit();
+    return this.refreshMcpCapabilities();
+  }
+
+  async beginMcpAuthorization(serverId: string): Promise<string> {
+    const configuration = await this.requireRemoteMcpConfiguration(serverId);
+    return this.toolGateway.clients.auth.begin(serverId, configuration.url!);
+  }
+
+  async completeMcpAuthorization(serverId: string, callback: string): Promise<CapabilitiesSnapshot> {
+    const configuration = await this.requireRemoteMcpConfiguration(serverId);
+    await this.toolGateway.clients.auth.complete(serverId, configuration.url!, callback);
+    return this.refreshMcpCapabilities();
+  }
+
+  async revokeMcpAuthorization(serverId: string): Promise<CapabilitiesSnapshot> {
+    const configuration = await this.requireRemoteMcpConfiguration(serverId);
+    await this.toolGateway.clients.auth.revoke(serverId, configuration.url!);
+    return this.refreshMcpCapabilities();
   }
 
   async setConnectorEnabled(id: string, enabled: boolean): Promise<CapabilitiesSnapshot> {
@@ -541,15 +609,27 @@ export class MainController {
     const executeTool = (name: ComputerToolName, args: Record<string, unknown>, options?: { readOnly?: boolean }) => this.executeComputerTool(conversationId, name, args, options);
     const controlTask = (taskId: string, request: TaskControlRequest) => this.controlTask(taskId, request);
     try {
-      const [agents, capabilities] = await Promise.all([
+      const [agents, capabilities, mcpConfigurations] = await Promise.all([
         this.agents.selected(conversation.selectedAgentIds, conversation.workingDirectory),
         this.capabilities.snapshot(conversation.workingDirectory),
+        this.capabilities.mcpServerConfigurations(),
       ]);
       const selectedSkillPaths = capabilities.skills.filter((skill) => skill.enabled).map((skill) => skill.path);
+      const preparedMcp = conversation.provider === "openrouter"
+        ? await this.toolGateway.prepare(mcpConfigurations, settings.mcpToolPolicies ?? {})
+        : { tools: [], results: [] };
+      const executeMcpTool = (name: string, args: Record<string, unknown>, options?: { readOnly?: boolean }) => this.executeMcpTool(
+        conversationId,
+        mcpConfigurations,
+        name,
+        args,
+        controller.signal,
+        options?.readOnly === true,
+      );
       this.runAgentIcons.set(conversationId, new Map(agents.flatMap((agent) => agent.icon ? [[agent.name.toLowerCase(), agent.icon] as const] : [])));
       await this.harnessRegistry.dispatch(
         conversation,
-        { conversation, settings, agents, prompt, signal: controller.signal, selectedSkillPaths, computerAccess, executeTool, controlTask, onEvent },
+        { conversation, settings, agents, prompt, signal: controller.signal, selectedSkillPaths, computerAccess, executeTool, controlTask, mcpTools: preparedMcp.tools, executeMcpTool, onEvent },
         this.requiredHarnessCapabilities(conversation),
       );
       const current = this.state.conversations.find((item) => item.id === conversationId);
@@ -729,6 +809,51 @@ export class MainController {
     }
   }
 
+  private async executeMcpTool(
+    conversationId: string,
+    configurations: Awaited<ReturnType<CapabilitiesService["mcpServerConfigurations"]>>,
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+    readOnly: boolean,
+  ): Promise<string> {
+    const conversation = this.requireConversation(conversationId);
+    let authorizedTool: HarnessMcpTool | undefined;
+    let authorizationAttempted = false;
+    let authorized = false;
+    try {
+      const output = await this.toolGateway.execute({
+        configurations,
+        policies: this.state.settings.mcpToolPolicies ?? {},
+        name,
+        args,
+        readOnly,
+        signal,
+        authorize: async (tool) => {
+          authorizedTool = tool;
+          authorizationAttempted = true;
+          await this.authorizeComputerTool(conversation, "mcp", `mcp_${tool.classification}`, `${tool.serverId}/${tool.originalName}`);
+          authorized = true;
+        },
+      });
+      const target = authorizedTool ? `${authorizedTool.serverId}/${authorizedTool.originalName}` : name;
+      const audit = this.appendComputerAudit(conversation, "mcp", name, target, "allowed", "completed", `MCP tool completed (${output.length} characters returned).`);
+      await this.recordAuditEvent(conversation, audit);
+      await this.commit();
+      return output;
+    } catch (error) {
+      const message = error instanceof Error && /authorization|cancelled|timed out|disconnected|restricted|read-only|unavailable/i.test(error.message)
+        ? error.message.slice(0, 300)
+        : "MCP tool failed without persisting server-provided error content.";
+      if (authorizationAttempted && !authorized) throw error;
+      const target = authorizedTool ? `${authorizedTool.serverId}/${authorizedTool.originalName}` : name;
+      const audit = this.appendComputerAudit(conversation, "mcp", name, target, authorized ? "allowed" : "denied", "failed", message);
+      await this.recordAuditEvent(conversation, audit);
+      await this.commit();
+      throw error;
+    }
+  }
+
   private async authorizeComputerTool(conversation: Conversation, capability: ComputerCapabilityId, action: string, target: string): Promise<boolean> {
     const access = this.state.computerAccess;
     if (!access.enabled || access.grants[capability] === "blocked") {
@@ -742,8 +867,8 @@ export class MainController {
     const device = this.computerAccess.snapshot(access, conversation.workingDirectory).devices.find((item) => item.id === access.activeDeviceId);
     const approval: ComputerApprovalRequest = {
       id: `approval-${id()}`,
-      deviceId: access.activeDeviceId,
-      deviceName: device?.name || "Computer",
+      deviceId: capability === "mcp" ? access.localDeviceId : access.activeDeviceId,
+      deviceName: capability === "mcp" ? "Grokky MCP gateway" : device?.name || "Computer",
       conversationId: conversation.id,
       capability,
       action: action.replaceAll("_", " "),
@@ -774,7 +899,7 @@ export class MainController {
   ): ComputerAuditEntry {
     const audit: ComputerAuditEntry = {
       id: newAuditId(),
-      deviceId: this.state.computerAccess.activeDeviceId,
+      deviceId: capability === "mcp" ? this.state.computerAccess.localDeviceId : this.state.computerAccess.activeDeviceId,
       conversationId: conversation.id,
       provider: conversation.provider,
       capability,
@@ -804,6 +929,13 @@ export class MainController {
     return this.state.conversations.find((item) => item.id === this.state.activeConversationId)?.workingDirectory
       || this.state.settings.defaultWorkingDirectory
       || this.homeDirectory;
+  }
+
+  private async requireRemoteMcpConfiguration(serverId: string) {
+    if (!/^[a-zA-Z0-9_@./-]{1,240}$/.test(serverId)) throw new Error("Invalid MCP server ID");
+    const configuration = (await this.capabilities.mcpServerConfigurations()).find((server) => server.id === serverId && server.enabled);
+    if (!configuration || configuration.transport !== "streamable-http" || !configuration.url) throw new Error("Enabled remote MCP server was not found");
+    return configuration;
   }
 
   private rememberProject(pathname: string): void {

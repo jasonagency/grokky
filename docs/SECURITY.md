@@ -22,6 +22,7 @@ Security claims here apply to the source in this repository. Unsigned local buil
 | Codex sign-in material | Secret | Codex home, not Grokky state |
 | OpenRouter API key | Secret | Process environment or user-selected env file |
 | Pi provider credentials | Secret | Pi credential store or process environment |
+| MCP bearer and OAuth tokens | Secret | Process environment or encrypted Electron user data |
 | Runner bearer token | Secret | Runner private state; encrypted in Grokky state |
 | Conversations and messages | Private user data | Electron user-data directory |
 | Workspace files | Potentially private | User-selected workspace |
@@ -115,6 +116,14 @@ The key is passed to the OpenRouter SDK and request headers only for the active 
 Pi runs through its native SDK in Electron's main process. It reads provider credentials from Pi's private credential store or supported environment variables; the renderer receives only readiness labels. Grokky disables Pi's built-in read, bash, edit, and write tools and disables extensions. The SDK receives only custom tools that call Grokky's existing file, command, browser, screen, automation, durable task-control, and agent-message gates. Read-only mode removes every mutating tool before session creation, and each retained tool is re-authorized at execution time.
 
 Pi session files live in Grokky-owned session storage and retain the leased workspace as their working directory. Persisted session references are accepted only from inside that storage root. Selected project guidance may load through the controlled resource loader; unselected skills, prompt templates, themes, and project extensions do not.
+
+### MCP gateway
+
+OpenRouter MCP transports, discovery, authentication, and calls run only in Electron's main process. The renderer never receives a configured command, argument list, environment value, header, bearer token, OAuth token, or PKCE verifier. Remote OAuth records are encrypted with Electron `safeStorage` before a mode `0600` file is written under app user data. The test-only in-memory auth manager does not persist secrets.
+
+The gateway creates stable namespaced tool identities and rejects recursive, oversized, deeply nested, excessive, or colliding schemas. It caps tool count, protocol buffers, call duration, and model-visible output. Unannotated tools default to external side effect. Human-only tools are never advertised, and read-only specialists receive only tools classified as read.
+
+Every MCP call crosses the MCP computer capability, approval state, per-tool classification, timeout, abort, and audit path. Audit and control-plane events contain server and tool identity plus bounded outcome detail, not tokens or server configuration. A disconnect closes and evicts the client. A failed OAuth refresh removes unusable credentials and leaves the server authorization-required.
 
 ### Remote runner
 
@@ -231,7 +240,7 @@ Deleting a conversation removes it from Grokky's state after cancelling active w
 
 ## Installed capability risk
 
-Skills, MCP servers, and connectors execute through the Codex ecosystem and may introduce their own code, network, authentication, and data boundaries. Grokky can discover and toggle configured entries. It does not audit every third-party implementation.
+Skills, MCP servers, and connectors may introduce their own code, network, authentication, and data boundaries. Grokky can discover and toggle configured entries. OpenRouter MCP calls receive gateway policy and auditing, but Grokky cannot prove that a third-party tool's description, annotations, implementation, or returned content is honest.
 
 Before enabling one:
 
@@ -240,6 +249,7 @@ Before enabling one:
 - Prefer a project scope over a global scope when possible.
 - Keep unrelated sensitive folders outside the selected workspace.
 - Confirm the provider and plugin source are trusted.
+- Treat server annotations as hints and set an explicit Grokky classification for sensitive tools.
 
 ## Repository publication gate
 

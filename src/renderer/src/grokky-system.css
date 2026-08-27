@@ -2321,6 +2321,51 @@ button.settings-row:hover {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
 }
 
+.mcp-tool-policy {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 2px 42px;
+  border-top: 1px solid var(--line);
+}
+
+.mcp-status {
+  color: var(--text-muted);
+  font: 600 9px/1.4 var(--g-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.mcp-status.ready { color: var(--success); }
+.mcp-status.error,
+.mcp-status.authorization-required { color: var(--warning); }
+
+.mcp-tool-row,
+.mcp-auth-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.mcp-tool-row span { display: grid; gap: 2px; min-width: 0; }
+.mcp-tool-row strong { color: var(--text); font: 600 11px/1.25 var(--g-sans); }
+.mcp-tool-row small { overflow: hidden; color: var(--text-muted); font: 500 9px/1.35 var(--g-mono); text-overflow: ellipsis; }
+.mcp-tool-row select,
+.mcp-auth-controls input {
+  min-height: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: 500 10px/1 var(--g-mono);
+}
+
+.mcp-auth-controls { grid-template-columns: auto minmax(180px, 1fr) auto; }
+.mcp-auth-controls input { padding: 0 8px; }
+.mcp-auth-controls button,
+.mcp-revoke { min-height: 30px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface); color: var(--text); font: 600 9px/1 var(--g-mono); }
+
 .capability-search {
   height: 44px;
 }

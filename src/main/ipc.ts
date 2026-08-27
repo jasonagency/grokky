@@ -3,6 +3,7 @@ import type { MainController } from "./controller";
 import { IPC } from "../shared/contracts";
 import { validateTaskAction, validateTaskGoalDraft, validateTaskId } from "./control-plane/task-graph";
 import type { ControlPolicyPatch, TaskControlRequest } from "../shared/control-plane-contracts";
+import type { McpToolClassification } from "../shared/contracts";
 import {
   requireComputerAccessLevel,
   requireComputerApprovalDecision,
@@ -50,6 +51,7 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.settingsUpdate, (_event, patch) => controller.updateSettings(validateSettingsPatch(patch)));
   ipcMain.handle(IPC.providersRefresh, () => controller.refreshProviderStatuses());
   ipcMain.handle(IPC.capabilitiesGet, () => controller.getCapabilities());
+  ipcMain.handle(IPC.mcpRefresh, () => controller.refreshMcpCapabilities());
   ipcMain.handle(IPC.skillToggle, (_event, pathname, enabled) => {
     if (typeof pathname !== "string" || pathname.length > 4_000 || typeof enabled !== "boolean") throw new Error("Invalid skill update");
     return controller.setSkillEnabled(pathname, enabled);
@@ -57,6 +59,31 @@ export function registerIpc(controller: MainController): void {
   ipcMain.handle(IPC.mcpToggle, (_event, id, enabled) => {
     if (typeof id !== "string" || id.length > 240 || typeof enabled !== "boolean") throw new Error("Invalid MCP update");
     return controller.setMcpEnabled(id, enabled);
+  });
+  ipcMain.handle(IPC.mcpToolClassify, (_event, name, value) => {
+    if (typeof name !== "string" || typeof value !== "string") throw new Error("Invalid MCP tool policy");
+    return controller.setMcpToolClassification(name, value as McpToolClassification);
+  });
+  ipcMain.handle(IPC.mcpAuthBegin, async (_event, id) => {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_@./-]{1,240}$/.test(id)) throw new Error("Invalid MCP server ID");
+    const serverId = id;
+    const url = await controller.beginMcpAuthorization(serverId);
+    if (url !== "authorized") {
+      const target = new URL(url);
+      const loopback = target.hostname === "localhost" || target.hostname === "127.0.0.1" || target.hostname === "::1";
+      if (target.protocol !== "https:" && !(target.protocol === "http:" && loopback)) throw new Error("MCP authorization URL must use HTTPS or loopback HTTP");
+      await shell.openExternal(target.toString());
+    }
+    return url;
+  });
+  ipcMain.handle(IPC.mcpAuthComplete, (_event, id, callback) => {
+    if (typeof callback !== "string" || !callback.trim() || callback.length > 8_000) throw new Error("Invalid MCP authorization callback");
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_@./-]{1,240}$/.test(id)) throw new Error("Invalid MCP server ID");
+    return controller.completeMcpAuthorization(id, callback);
+  });
+  ipcMain.handle(IPC.mcpAuthRevoke, (_event, id) => {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_@./-]{1,240}$/.test(id)) throw new Error("Invalid MCP server ID");
+    return controller.revokeMcpAuthorization(id);
   });
   ipcMain.handle(IPC.connectorToggle, (_event, id, enabled) => {
     if (typeof id !== "string" || id.length > 240 || typeof enabled !== "boolean") throw new Error("Invalid connector update");

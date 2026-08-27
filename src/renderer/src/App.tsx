@@ -58,6 +58,7 @@ import type {
   RunOutcome,
   SandboxMode,
   SkillCapability,
+  McpToolClassification,
 } from "../../shared/contracts";
 import type { ProjectionChange } from "../../shared/control-plane-contracts";
 import { CODEX_MODELS } from "../../shared/contracts";
@@ -67,6 +68,7 @@ import { ModelCombobox, SelectMenu, type SelectChoice } from "./Controls";
 import { activitiesForDisplay, type DisplayActivity } from "./activity-display";
 import { crewRunsForDisplay, crewRunStage, groupCrewCommunications } from "./crew-display";
 import { TaskControlRoom } from "./features/tasks/TaskControlRoom";
+import { McpToolPolicy } from "./features/team/McpToolPolicy";
 
 const OPENROUTER_SUGGESTIONS = [
   "openai/gpt-5.2",
@@ -1054,6 +1056,7 @@ function scopeLabel(skill: SkillCapability): string {
 }
 
 function ComputerCapabilityIcon({ id }: { id: ComputerCapabilityId }) {
+  if (id === "mcp") return <PlugsConnected size={17} />;
   if (id === "screen") return <Eye size={17} />;
   if (id === "automation") return <CursorClick size={17} />;
   if (id === "browser") return <GlobeHemisphereWest size={17} />;
@@ -1096,6 +1099,15 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   }, [initialTab, onError]);
 
   useEffect(() => {
+    if (tab !== "mcp") return;
+    setBusy("mcp-refresh");
+    void window.grokky.refreshMcpCapabilities()
+      .then(setCapabilities)
+      .catch((error) => onError(error instanceof Error ? error.message : "MCP tools could not be discovered"))
+      .finally(() => setBusy(""));
+  }, [tab, onError]);
+
+  useEffect(() => {
     setNetworkDomains(snapshot.computerAccess.networkAllowlist.join("\n"));
   }, [snapshot.computerAccess.networkAllowlist]);
 
@@ -1127,6 +1139,18 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
       setCapabilities(await action());
     } catch (error) {
       onError(error instanceof Error ? error.message : "Capability could not be updated");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function mcpAuthorization(key: string, action: () => Promise<void | CapabilitiesSnapshot>) {
+    setBusy(key);
+    try {
+      const result = await action();
+      if (result) setCapabilities(result);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "MCP authorization could not be updated");
     } finally {
       setBusy("");
     }
@@ -1494,7 +1518,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
 
             {tab === "mcp" && (
               <div className="settings-stack capability-stack">
-                <div className="settings-intro"><h3>Configured MCP servers</h3><p>Grokky inherits the same local Codex MCP configuration.</p></div>
+                <div className="settings-intro"><h3>Configured MCP servers</h3><p>Grokky inherits the same local Codex MCP configuration. Opening this view connects enabled servers in the main process to discover their current tool catalogs.</p></div>
                 {!capabilities ? <div className="capability-loading"><InlineLoader label="Loading servers" /><span>Loading servers</span></div> : (
                   <div className="capability-list">
                     {capabilities.mcpServers.map((server) => (
@@ -1502,12 +1526,20 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                         <span className="settings-row-icon"><PlugsConnected size={18} /></span>
                         <span className="settings-copy"><strong>{server.name}<em>{server.transport}</em></strong><small>{server.id}</small></span>
                         <Switch checked={server.enabled} disabled={busy === server.id} label={`${server.name} MCP server`} onChange={(enabled) => void toggleCapability(server.id, () => window.grokky.setMcpEnabled(server.id, enabled))} />
+                        {server.enabled && <McpToolPolicy
+                          server={server}
+                          busy={busy === server.id || busy.startsWith(`${server.id}:`)}
+                          onClassify={(name, classification: McpToolClassification) => toggleCapability(`${server.id}:${name}`, () => window.grokky.setMcpToolClassification(name, classification))}
+                          onBeginAuthorization={() => mcpAuthorization(`${server.id}:auth`, async () => { await window.grokky.beginMcpAuthorization(server.id); })}
+                          onCompleteAuthorization={(callback) => mcpAuthorization(`${server.id}:auth`, () => window.grokky.completeMcpAuthorization(server.id, callback))}
+                          onRevokeAuthorization={() => mcpAuthorization(`${server.id}:auth`, () => window.grokky.revokeMcpAuthorization(server.id))}
+                        />}
                       </div>
                     ))}
                     {!capabilities.mcpServers.length && <div className="capability-empty">No MCP servers are configured.</div>}
                   </div>
                 )}
-                <p className="settings-note">Local and remote MCP tools are available to Codex when their own approval policy allows them.</p>
+                <p className="settings-note">OpenRouter receives only namespaced tools allowed by Grokky policy. Unannotated tools default to external side effect; read-only specialists receive read-classified tools only.</p>
               </div>
             )}
 

@@ -61,6 +61,7 @@ export function defaultComputerAccess(): PersistedComputerAccess {
       browser: "ask",
       screen: "ask",
       automation: "ask",
+      mcp: "ask",
     },
     networkAllowlist: [],
     remoteDevices: [],
@@ -86,12 +87,13 @@ export function defaultPersistentState(homeDirectory: string): PersistentState {
       interruptAgentMessage: true,
       connectorsEnabled: true,
       webSearchEnabled: true,
+      mcpToolPolicies: {},
     },
     computerAccess: defaultComputerAccess(),
   };
 }
 
-const capabilityIds = new Set<ComputerCapabilityId>(["files", "commands", "browser", "screen", "automation"]);
+const capabilityIds = new Set<ComputerCapabilityId>(["files", "commands", "browser", "screen", "automation", "mcp"]);
 const accessLevels = new Set<ComputerAccessLevel>(["blocked", "ask", "allow"]);
 
 function normalizeComputerAccess(value: unknown): PersistedComputerAccess {
@@ -354,6 +356,12 @@ export function normalizePersistentState(
       interruptAgentMessage: typeof settings.interruptAgentMessage === "boolean" ? settings.interruptAgentMessage : true,
       connectorsEnabled: typeof settings.connectorsEnabled === "boolean" ? settings.connectorsEnabled : true,
       webSearchEnabled: typeof settings.webSearchEnabled === "boolean" ? settings.webSearchEnabled : true,
+      mcpToolPolicies: settings.mcpToolPolicies && typeof settings.mcpToolPolicies === "object"
+        ? Object.fromEntries(Object.entries(settings.mcpToolPolicies).filter(([name, classification]) => (
+            /^[a-zA-Z0-9_-]{1,100}$/.test(name)
+            && new Set(["read", "write", "external-side-effect", "human-only"]).has(String(classification))
+          )).slice(0, 1_000)) as AppSettings["mcpToolPolicies"]
+        : {},
     },
     computerAccess: normalizeComputerAccess(parsed.computerAccess),
   };

@@ -33,6 +33,7 @@ npm run dev
 | `npm run smoke:codex-web` | Live Codex web search | Codex |
 | `npm run smoke:multiagent` | Live native child threads | Codex |
 | `npm run smoke:openrouter` | Basic live OpenRouter chat | OpenRouter |
+| `npm run smoke:openrouter-mcp` | Approved local MCP call through a live model | OpenRouter and local fake MCP |
 | `npm run smoke:openrouter-crew` | Parallel specialists plus lead | OpenRouter |
 | `npm run smoke:openrouter-web` | Auditable server-side web search | OpenRouter |
 | `npm run smoke:pi` | Native SDK streaming, persistent session, and usage | Pi provider credential |

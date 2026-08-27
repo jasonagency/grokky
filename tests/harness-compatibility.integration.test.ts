@@ -53,7 +53,7 @@ function context(provider: Conversation["provider"], onEvent: ProviderRunContext
       enabled: false,
       localDeviceId: "local-test-device",
       activeDeviceId: "local-test-device",
-      grants: { files: "blocked", commands: "blocked", browser: "blocked", screen: "blocked", automation: "blocked" },
+      grants: { files: "blocked", commands: "blocked", browser: "blocked", screen: "blocked", automation: "blocked", mcp: "blocked" },
       networkAllowlist: [],
       remoteDevices: [],
       auditLog: [],

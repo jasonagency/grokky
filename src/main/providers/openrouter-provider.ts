@@ -169,6 +169,17 @@ function toolsFor(context: OpenRouterRunContext, conversation: Conversation, rea
   if (!context.computerAccess.enabled) return [];
   const activeRemote = context.computerAccess.remoteDevices.find((device) => device.id === context.computerAccess.activeDeviceId && !device.revoked);
   const capabilities = new Set(activeRemote?.capabilities ?? ["files", "commands", "browser", "screen", "automation"]);
+  const mcpTools: ChatFunctionTool[] = (context.executeMcpTool ? context.mcpTools ?? [] : [])
+    .filter((tool) => tool.classification !== "human-only" && (!readOnly || tool.classification === "read"))
+    .map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters as never,
+        strict: true,
+      },
+    }));
   return [
     ...(capabilities.has("files") && context.computerAccess.grants.files !== "blocked" ? readTools : []),
     ...(!readOnly && capabilities.has("files") && context.computerAccess.grants.files !== "blocked" && conversation.sandboxMode === "workspace-write" ? writeTools : []),
@@ -176,6 +187,7 @@ function toolsFor(context: OpenRouterRunContext, conversation: Conversation, rea
     ...(capabilities.has("browser") && context.computerAccess.grants.browser !== "blocked" ? [browserTool] : []),
     ...(capabilities.has("screen") && context.computerAccess.grants.screen !== "blocked" ? [screenTool] : []),
     ...(!readOnly && capabilities.has("automation") && context.computerAccess.grants.automation !== "blocked" ? automationTools : []),
+    ...(context.computerAccess.grants.mcp !== "blocked" ? mcpTools : []),
   ];
 }
 
@@ -472,7 +484,9 @@ async function runLoop(
       let toolOutput: string;
       try {
         const args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
-        toolOutput = await context.executeTool(call.function.name as ComputerToolName, args, { readOnly });
+        toolOutput = context.mcpTools?.some((tool) => tool.name === call.function.name)
+          ? await context.executeMcpTool!(call.function.name, args, { readOnly })
+          : await context.executeTool(call.function.name as ComputerToolName, args, { readOnly });
         if (options.emitActivity !== false) {
           await context.onEvent({ type: "activity", activity: activityForCall(call, "completed", toolOutput, options.activityPrefix) });
         }

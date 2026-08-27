@@ -11,7 +11,7 @@ export type AgentScope = "built-in" | "personal" | "project";
 export type AgentRunStatus = "starting" | "working" | "waiting" | "completed" | "failed" | "stopped";
 export type AgentIcon = "lime" | "cyan" | "coral" | "violet" | "amber" | "mint";
 export type AccentPalette = "lime" | "electric-blue" | "ultraviolet" | "solar-amber" | "ice";
-export type ComputerCapabilityId = "files" | "commands" | "browser" | "screen" | "automation";
+export type ComputerCapabilityId = "files" | "commands" | "browser" | "screen" | "automation" | "mcp";
 export type ComputerAccessLevel = "blocked" | "ask" | "allow";
 export type ComputerPermissionStatus = "granted" | "denied" | "not-determined" | "not-required" | "unavailable";
 export type ComputerDeviceStatus = "online" | "offline" | "revoked";
@@ -152,6 +152,7 @@ export interface AppSettings {
   interruptAgentMessage: boolean;
   connectorsEnabled: boolean;
   webSearchEnabled: boolean;
+  mcpToolPolicies?: Record<string, McpToolClassification>;
 }
 
 export interface ComputerCapability {
@@ -224,6 +225,19 @@ export interface McpCapability {
   name: string;
   transport: "local" | "remote" | "configured";
   enabled: boolean;
+  tools?: McpToolCapability[];
+  status?: "idle" | "ready" | "authorization-required" | "error";
+  detail?: string;
+}
+
+export type McpToolClassification = "read" | "write" | "external-side-effect" | "human-only";
+
+export interface McpToolCapability {
+  name: string;
+  namespacedName: string;
+  description: string;
+  classification: McpToolClassification;
+  classificationSource: "operator" | "server-annotation" | "safe-default";
 }
 
 export interface ConnectorCapability {
@@ -284,8 +298,13 @@ export interface GrokkyApi {
   updateSettings(patch: Partial<AppSettings>): Promise<void>;
   refreshProviderStatuses(): Promise<void>;
   getCapabilities(): Promise<CapabilitiesSnapshot>;
+  refreshMcpCapabilities(): Promise<CapabilitiesSnapshot>;
   setSkillEnabled(path: string, enabled: boolean): Promise<CapabilitiesSnapshot>;
   setMcpEnabled(id: string, enabled: boolean): Promise<CapabilitiesSnapshot>;
+  setMcpToolClassification(name: string, classification: McpToolClassification): Promise<CapabilitiesSnapshot>;
+  beginMcpAuthorization(id: string): Promise<string>;
+  completeMcpAuthorization(id: string, code: string): Promise<CapabilitiesSnapshot>;
+  revokeMcpAuthorization(id: string): Promise<CapabilitiesSnapshot>;
   setConnectorEnabled(id: string, enabled: boolean): Promise<CapabilitiesSnapshot>;
   getAgents(): Promise<AgentDefinition[]>;
   createAgent(draft: AgentDraft): Promise<AgentDefinition[]>;
@@ -324,8 +343,13 @@ export const IPC = {
   settingsUpdate: "grokky:settings:update",
   providersRefresh: "grokky:providers:refresh",
   capabilitiesGet: "grokky:capabilities:get",
+  mcpRefresh: "grokky:capabilities:mcp-refresh",
   skillToggle: "grokky:capabilities:skill-toggle",
   mcpToggle: "grokky:capabilities:mcp-toggle",
+  mcpToolClassify: "grokky:capabilities:mcp-tool-classify",
+  mcpAuthBegin: "grokky:capabilities:mcp-auth-begin",
+  mcpAuthComplete: "grokky:capabilities:mcp-auth-complete",
+  mcpAuthRevoke: "grokky:capabilities:mcp-auth-revoke",
   connectorToggle: "grokky:capabilities:connector-toggle",
   agentsGet: "grokky:agents:get",
   agentCreate: "grokky:agents:create",

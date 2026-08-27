@@ -25,7 +25,7 @@ describe("Pi Grokky tools", () => {
     context.conversation.sandboxMode = "read-only";
     context.conversation.allowCommands = true;
     context.computerAccess.enabled = true;
-    context.computerAccess.grants = { files: "allow", commands: "allow", browser: "allow", screen: "allow", automation: "allow" };
+    context.computerAccess.grants = { files: "allow", commands: "allow", browser: "allow", screen: "allow", automation: "allow", mcp: "allow" };
     const names = createPiTools(context).map((tool) => tool.name);
     expect(names).toEqual(expect.arrayContaining(["list_files", "read_file", "browse_url", "capture_screen"]));
     expect(names).not.toEqual(expect.arrayContaining(["create_file", "edit_file", "run_command", "open_application", "click_screen", "type_text"]));
