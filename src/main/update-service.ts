@@ -179,7 +179,9 @@ export class DisabledUpdateAdapter implements UpdateAdapter {
 }
 
 export async function createElectronUpdateAdapter(repository: string): Promise<UpdateAdapter> {
-  const { autoUpdater } = await import("electron-updater");
+  const updaterModule = await import("electron-updater") as typeof import("electron-updater") & { default?: typeof import("electron-updater") };
+  const autoUpdater = updaterModule.default?.autoUpdater ?? updaterModule.autoUpdater;
+  if (!autoUpdater) throw new Error("The packaged updater runtime is unavailable");
   const listeners = new Set<(event: UpdateAdapterEvent) => void>();
   const release = (info: import("electron-updater").UpdateInfo): UpdateReleaseInfo => {
     const prerelease = parseVersion(info.version)?.prerelease?.channel;

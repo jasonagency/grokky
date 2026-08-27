@@ -400,8 +400,8 @@ app.whenReady().then(async () => {
             title: "Ship durable orchestration",
             objective: "Verify the queue is readable and operable after restart",
             nodes: [
-              { id: `smoke-root-${suffix}`, title: "Recover active leases", description: "Reconcile the last checkpoint", priority: 8 },
-              { id: `smoke-child-${suffix}`, title: "Notify the operator", description: "Wait for recovery to succeed", dependsOn: [`smoke-root-${suffix}`], priority: 5 },
+              { id: `smoke-root-${suffix}`, title: "Recover active leases", description: "Reconcile the last checkpoint", priority: 8, assignment: { harnessId: "smoke-fixture" } },
+              { id: `smoke-child-${suffix}`, title: "Notify the operator", description: "Wait for recovery to succeed", dependsOn: [`smoke-root-${suffix}`], priority: 5, assignment: { harnessId: "smoke-fixture" } },
             ],
           });
           await mainWindow.webContents.executeJavaScript(`document.querySelector('[data-settings-tab="tasks"]')?.click()`);

@@ -80,7 +80,15 @@ export class IntegrationQueue {
       await this.persist(record);
       return record;
     } finally {
-      if (worktree! && !await request.repository.status(worktree.path)) await this.worktrees.removeClean(request.repository, worktree.path);
+      if (worktree!) {
+        try {
+          if (!await request.repository.status(worktree.path)) await this.worktrees.removeClean(request.repository, worktree.path);
+        } catch (error) {
+          record.cleanupWarning = error instanceof Error ? error.message : "Integration worktree cleanup failed";
+          record.updatedAt = Date.now();
+          await this.persist(record);
+        }
+      }
     }
   }
 

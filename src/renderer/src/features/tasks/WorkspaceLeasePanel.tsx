@@ -1,6 +1,6 @@
 import type { WorkspaceStateSnapshot } from "../../../../shared/control-plane-contracts";
 
-export function WorkspaceLeasePanel({ taskId, state }: { taskId?: string; state?: WorkspaceStateSnapshot }) {
+export function WorkspaceLeasePanel({ taskId, state, busy, onIntegrate }: { taskId?: string; state?: WorkspaceStateSnapshot; busy?: boolean; onIntegrate?(leaseId: string, targetRef: string): void }) {
   if (!taskId) return null;
   const leases = state?.leases.filter((lease) => lease.taskId === taskId) ?? [];
   const integrations = state?.integrations.filter((integration) => integration.taskId === taskId) ?? [];
@@ -19,8 +19,10 @@ export function WorkspaceLeasePanel({ taskId, state }: { taskId?: string; state?
           {lease.branch && <div><dt>Branch</dt><dd>{lease.branch}</dd></div>}
         </dl>
         {lease.recoveryReason && <p className="workspace-recovery">{lease.recoveryReason}</p>}
+        {lease.kind === "git" && lease.status === "completed" && lease.baseCommit && onIntegrate && <button type="button" disabled={busy} onClick={() => onIntegrate(lease.id, lease.baseCommit!)}>{busy ? "Integrating…" : "Integrate verified branch"}</button>}
       </>}
       {integration && <p>Integration: <strong>{integration.status}</strong>{integration.conflictFiles?.length ? ` (${integration.conflictFiles.join(", ")})` : ""}</p>}
+      {integration?.cleanupWarning && <p className="workspace-recovery">Cleanup needs attention: {integration.cleanupWarning}</p>}
     </aside>
   );
 }

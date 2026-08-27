@@ -430,6 +430,7 @@ export interface GrokkyApi {
   lockScreen(leaseId: string, epoch: number): Promise<void>;
   createTaskGoal(draft: TaskGoalDraft): Promise<void>;
   actOnTask(taskId: string, action: TaskAction): Promise<void>;
+  integrateTaskWorkspace(leaseId: string, targetRef: string): Promise<void>;
   controlTask(taskId: string, control: TaskControlRequest): Promise<void>;
   updateControlPolicies(patch: ControlPolicyPatch): Promise<void>;
   queryTrace(query: TraceQuery): Promise<TraceBundle>;
@@ -495,6 +496,7 @@ export const IPC = {
   computerScreenLock: "grokky:computer:screen-lock",
   taskGoalCreate: "grokky:tasks:goal-create",
   taskAction: "grokky:tasks:action",
+  taskWorkspaceIntegrate: "grokky:tasks:workspace-integrate",
   taskControl: "grokky:tasks:control",
   controlPoliciesUpdate: "grokky:control:policies-update",
   traceQuery: "grokky:quality:trace-query",

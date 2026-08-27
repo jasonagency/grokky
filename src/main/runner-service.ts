@@ -23,6 +23,9 @@ interface RunnerOptions {
   statePath: string;
   allowWrite: boolean;
   allowCommands: boolean;
+  pairingCodeTtlMs: number;
+  pairingAttemptLimit: number;
+  now(): number;
   onReady?(details: { endpoint: string; code: string; deviceId: string }): void;
   agentHostFactory?(credential: string, deviceId: string): AgentHost | Promise<AgentHost>;
 }
@@ -98,7 +101,14 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
   const state = await loadRunnerState(options.statePath);
   const agentHost = options.agentHostFactory ? await options.agentHostFactory(state.token, state.deviceId) : undefined;
   await agentHost?.initialize();
+  const now = options.now ?? Date.now;
+  const pairingCodeTtlMs = options.pairingCodeTtlMs ?? 10 * 60_000;
+  const pairingAttemptLimit = options.pairingAttemptLimit ?? 10;
+  if (!Number.isFinite(pairingCodeTtlMs) || pairingCodeTtlMs < 30_000) throw new Error("Pairing code lifetime must be at least 30 seconds");
+  if (!Number.isInteger(pairingAttemptLimit) || pairingAttemptLimit < 1 || pairingAttemptLimit > 100) throw new Error("Pairing attempt limit must be between 1 and 100");
   let code = pairingCode();
+  let codeExpiresAt = now() + pairingCodeTtlMs;
+  let pairingAttempts = 0;
   const capabilities: ComputerCapabilityId[] = ["files", ...(options.allowCommands ? ["commands" as const] : [])];
   const server = createServer(async (request, response) => {
     try {
@@ -118,11 +128,18 @@ export async function startRunnerServer(options: Partial<RunnerOptions> & Pick<R
       }
       const body = await readJson(request);
       if (url.pathname === "/pair") {
+        if (now() >= codeExpiresAt || pairingAttempts >= pairingAttemptLimit) {
+          send(response, 429, { error: "Pairing code expired or exceeded its attempt limit; restart the runner to issue a new code" });
+          return;
+        }
         if (typeof body.code !== "string" || !tokenEqual(body.code, code)) {
+          pairingAttempts += 1;
           send(response, 403, { error: "Pairing code is invalid or expired" });
           return;
         }
         code = pairingCode();
+        codeExpiresAt = now() + pairingCodeTtlMs;
+        pairingAttempts = 0;
         send(response, 200, {
           token: state.token,
           protocol: REMOTE_PROTOCOL,

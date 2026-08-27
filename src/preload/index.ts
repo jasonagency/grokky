@@ -61,6 +61,7 @@ const api: GrokkyApi = {
   lockScreen: (leaseId, epoch) => invoke(IPC.computerScreenLock, leaseId, epoch),
   createTaskGoal: (draft) => invoke(IPC.taskGoalCreate, draft),
   actOnTask: (taskId, action) => invoke(IPC.taskAction, taskId, action),
+  integrateTaskWorkspace: (leaseId, targetRef) => invoke(IPC.taskWorkspaceIntegrate, leaseId, targetRef),
   controlTask: (taskId, control) => invoke(IPC.taskControl, taskId, control),
   updateControlPolicies: (patch) => invoke(IPC.controlPoliciesUpdate, patch),
   queryTrace: (query) => invoke(IPC.traceQuery, query),

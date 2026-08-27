@@ -19,10 +19,20 @@ describe("RoutineService", () => {
     const repository = new TeamRepository(store.database);
     await repository.initialize();
     const routines = new RoutineService(repository, () => now);
-    const routine = await routines.create({ ownerAgentId: "agent:a", name: "Daily audit", template: { id: "goal", title: "Audit", objective: "Audit", nodes: [] }, schedule: { localTime: "09:00", timeZone: "America/Los_Angeles" }, targetHostId: "local", budgetUsd: 1, approvalBoundary: "external-side-effects", active: true });
+    const routine = await routines.create({ ownerAgentId: "agent:a", name: "Daily audit", template: { id: "goal", title: "Audit", objective: "Audit", nodes: [{ id: "task", title: "Audit" }] }, schedule: { localTime: "09:00", timeZone: "America/Los_Angeles" }, targetHostId: "local", budgetUsd: 1, approvalBoundary: "external-side-effects", active: true });
     now = routine.nextFireAt;
     expect(await routines.due()).toHaveLength(1);
+    expect(await routines.due()).toHaveLength(1);
+    const [occurrence] = await routines.due();
+    await routines.acknowledge(routine.id, occurrence!.occurrenceKey);
     expect(await routines.due()).toHaveLength(0);
     expect(() => routines.assertRetrySafe({ ambiguousExternalSideEffect: true })).toThrow("idempotency key or operator decision");
+  });
+
+  test("rejects a routine whose task template cannot be queued", async () => {
+    const repository = new TeamRepository(teamStore().database);
+    await repository.initialize();
+    const routines = new RoutineService(repository, () => Date.parse("2026-01-01T00:00:00Z"));
+    await expect(routines.create({ ownerAgentId: "agent:a", name: "Broken", template: { id: "goal", title: "Broken", objective: "Broken", nodes: [] }, schedule: { localTime: "09:00", timeZone: "UTC" }, targetHostId: "local", budgetUsd: 1, approvalBoundary: "external-side-effects", active: true })).rejects.toThrow("requires between 1 and 500 nodes");
   });
 });

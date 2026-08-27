@@ -150,6 +150,10 @@ export function registerIpc(controller: MainController): void {
     validateTaskId(taskId),
     validateTaskAction(action),
   ));
+  ipcMain.handle(IPC.taskWorkspaceIntegrate, (_event, leaseId, targetRef) => {
+    if (typeof targetRef !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._/@{}~^:+-]{0,499}$/.test(targetRef)) throw new Error("Invalid integration target");
+    return controller.integrateTaskWorkspace(requireId(leaseId, "workspace lease ID"), targetRef);
+  });
   ipcMain.handle(IPC.taskControl, (_event, taskId, value) => {
     if (!value || typeof value !== "object") throw new Error("Invalid task control");
     const control = value as Partial<TaskControlRequest>;

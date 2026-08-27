@@ -388,8 +388,8 @@ The cleanest future seams are:
 - Add a provider behind the normalized `ProviderEvent` contract.
 - Add a local or remote tool behind `ComputerToolName`, capability mapping, and access audit.
 - Add forward-only persistence migrations under `src/main/storage` without exposing raw disk data to React.
-- Add OpenRouter MCP or connector support by converting external tool definitions into the bounded tool-loop contract.
-- Add remote screen or automation only after the runner has a transport, permission, and image-security design appropriate for it.
+- Add connector runtimes to OpenRouter only by converting their external tool definitions into the bounded, classified MCP/tool-loop contract.
+- Add production screen providers behind the existing remote screen transport only when the provisioned host has an explicit permission and image-security design.
 
 ## Independent implementation boundary
 

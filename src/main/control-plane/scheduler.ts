@@ -184,6 +184,19 @@ export class TaskScheduler {
     }));
   }
 
+  async interrupt(taskId: string, leaseId: string, status: "paused" | "canceled"): Promise<void> {
+    await this.enqueue(() => this.updateLeasedTask(taskId, leaseId, (task, now) => {
+      const attempt = task.attempts.find((candidate) => candidate.id === task.lease!.attemptId);
+      if (!attempt) throw new Error("Task lease does not reference a valid attempt");
+      attempt.status = "canceled";
+      attempt.completedAt = now;
+      task.status = status;
+      task.outcome = status === "canceled" ? { summary: "Canceled by operator", completedAt: now } : undefined;
+      task.lease = undefined;
+      task.updatedAt = now;
+    }));
+  }
+
   async complete(taskId: string, leaseId: string, outcome: Omit<TaskOutcome, "completedAt">): Promise<void> {
     const summary = outcome.summary.trim();
     if (!summary || summary.length > 4_000) throw new Error("Task outcome summary must be between 1 and 4,000 characters");

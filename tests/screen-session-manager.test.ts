@@ -30,4 +30,23 @@ describe("ScreenSessionManager", () => {
     await expect(manager.capture(lease.id, lease.epoch)).rejects.toThrow("stream disconnected");
     expect(manager.snapshot().leases[0]?.delivery).toBe("snapshot");
   });
+
+  test("can resume or revoke a stopped-input lease and still expires it", async () => {
+    let now = 10;
+    const closed: string[] = [];
+    const base = provider([]);
+    const manager = new ScreenSessionManager([{ ...base, close: async (sessionId) => { closed.push(sessionId); } }], () => now, 20);
+    const lease = await manager.lease("agent:a", "browser");
+    expect(manager.lock(lease.id, lease.epoch)).toMatchObject({ status: "paused", controller: "locked" });
+    expect(manager.returnControl(lease.id, lease.epoch)).toMatchObject({ status: "active", controller: "agent" });
+    expect(manager.lock(lease.id, lease.epoch)).toMatchObject({ status: "paused" });
+    await manager.revoke(lease.id, lease.epoch);
+    expect(manager.snapshot().leases[0]?.status).toBe("revoked");
+    expect(closed).toEqual([lease.providerSessionId]);
+
+    const expiring = await manager.lease("agent:b", "browser");
+    manager.lock(expiring.id, expiring.epoch);
+    now = 100;
+    expect(manager.snapshot().leases.find((item) => item.id === expiring.id)?.status).toBe("expired");
+  });
 });

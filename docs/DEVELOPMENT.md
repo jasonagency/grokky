@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - macOS on Apple Silicon or Windows on x64 for native packaging
-- Node.js 20.19 or newer
+- Node.js 22.19 or newer
 - npm 10 or newer
 - Xcode Command Line Tools for macOS packaging workflows
 - Optional saved Codex sign-in

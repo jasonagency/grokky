@@ -1316,7 +1316,36 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
   async function createRoutine(agentId: string, input: { name: string; localTime: string; timeZone: string }) {
     try {
       const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "routine";
-      await window.grokky.createAgentRoutine({ ownerAgentId: agentId, name: input.name, template: { id: `routine-${slug}`, title: input.name, objective: input.name, nodes: [] }, schedule: { localTime: input.localTime, timeZone: input.timeZone }, targetHostId: snapshot.computerAccess.activeDeviceId, budgetUsd: 1, approvalBoundary: "external-side-effects", active: true });
+      const active = snapshot.conversations.find((conversation) => conversation.id === snapshot.activeConversationId) ?? snapshot.conversations[0];
+      await window.grokky.createAgentRoutine({
+        ownerAgentId: agentId,
+        name: input.name,
+        template: {
+          id: `routine-${slug}`,
+          title: input.name,
+          objective: input.name,
+          nodes: [{
+            id: `task-${slug}`,
+            title: input.name,
+            description: input.name,
+            assignment: {
+              agentId,
+              ...(active?.harnessId ? { harnessId: active.harnessId } : {}),
+              ...(active?.model ? { model: active.model } : {}),
+              ...(active ? {
+                sourceConversationId: active.id,
+                workspace: active.workingDirectory,
+                workspaceMode: active.sandboxMode === "workspace-write" ? "write" as const : "read" as const,
+              } : {}),
+            },
+          }],
+        },
+        schedule: { localTime: input.localTime, timeZone: input.timeZone },
+        targetHostId: snapshot.computerAccess.activeDeviceId,
+        budgetUsd: 1,
+        approvalBoundary: "external-side-effects",
+        active: true,
+      });
     } catch (error) { onError(error instanceof Error ? error.message : "Routine could not be scheduled"); }
   }
 

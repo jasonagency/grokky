@@ -243,6 +243,9 @@ export interface TaskAssignment {
   harnessId?: string;
   model?: string;
   requiredCapabilities?: string[];
+  sourceConversationId?: string;
+  workspace?: string;
+  workspaceMode?: WorkspaceLeaseMode;
 }
 
 export interface TaskAttempt {
@@ -404,6 +407,7 @@ export interface IntegrationRecord {
   resultCommit?: string;
   conflictFiles?: string[];
   error?: string;
+  cleanupWarning?: string;
   verification: IntegrationVerification[];
   createdAt: number;
   updatedAt: number;

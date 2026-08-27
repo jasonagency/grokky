@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
@@ -6,7 +7,13 @@ const [mode = "write", label = process.platform] = process.argv.slice(2);
 const directory = join(process.cwd(), "release");
 
 async function digest(pathname) {
-  return createHash("sha256").update(await readFile(pathname)).digest("hex");
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    createReadStream(pathname)
+      .on("error", reject)
+      .on("data", (chunk) => hash.update(chunk))
+      .on("end", () => resolve(hash.digest("hex")));
+  });
 }
 
 if (mode === "write") {

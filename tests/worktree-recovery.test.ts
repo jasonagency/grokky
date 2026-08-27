@@ -50,4 +50,21 @@ describe("worktree recovery", () => {
 
     expect(manager.snapshot().leases[0]).toMatchObject({ status: "recovery", recoveryReason: "Worktree directory is missing; repair or recover it explicitly." });
   });
+
+  test("retains uncommitted work when an integrated branch is finalized", async () => {
+    const checkout = await createRepository(directories);
+    const root = await mkdtemp(join(tmpdir(), "grokky-recovery-"));
+    directories.push(root);
+    const manager = new WorkspaceLeaseManager(new MemoryWorkspaceStore(), root);
+    await manager.initialize();
+    const lease = await manager.acquire({ taskId: "task-integrated-dirty", workspace: checkout, holderId: "worker", mode: "write" });
+    await writeFile(join(lease.root, "uncommitted.txt"), "preserve me\n");
+
+    await manager.markIntegrated(lease.id);
+
+    expect(manager.snapshot().leases.find((entry) => entry.id === lease.id)).toMatchObject({
+      status: "recovery",
+      recoveryReason: "Integrated branch still has uncommitted work and was retained for recovery.",
+    });
+  });
 });

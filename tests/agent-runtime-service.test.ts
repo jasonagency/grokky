@@ -24,7 +24,7 @@ describe("AgentRuntimeService", () => {
     await service.initialize();
     await service.importDefinitions([profile]);
     await service.rememberSession(profile.id, "pi", "session-secret");
-    await new RoutineService(service.repository, () => 10).create({ ownerAgentId: profile.id, name: "Daily", template: { id: "daily", title: "Daily", objective: "Daily", nodes: [] }, schedule: { localTime: "09:00", timeZone: "UTC" }, targetHostId: "local", budgetUsd: 1, approvalBoundary: "always", active: true });
+    await new RoutineService(service.repository, () => 10).create({ ownerAgentId: profile.id, name: "Daily", template: { id: "daily", title: "Daily", objective: "Daily", nodes: [{ id: "daily-task", title: "Daily task" }] }, schedule: { localTime: "09:00", timeZone: "UTC" }, targetHostId: "local", budgetUsd: 1, approvalBoundary: "always", active: true });
     const copy = await service.duplicate(profile.id, "builder_copy");
     expect(copy.profile.name).toBe("builder_copy");
     expect(copy.sessionReferences).toEqual({});

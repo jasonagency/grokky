@@ -117,7 +117,7 @@ The runtimes intentionally share a UI contract, not an implementation.
 | Final coordinator | Codex parent thread | One lead model after specialists finish |
 | Workspace tools | Codex sandbox and SDK tools | Grokky's bounded functions |
 | Skills | Yes | Not yet |
-| MCP servers | Yes | Not yet |
+| MCP servers | Yes | Yes, through Grokky's audited gateway |
 | Connector plugins | Yes | Not yet |
 | Live web research | Codex live search | OpenRouter server web-search tool |
 | Screen input | Native SDK feature when always allowed | Grokky screenshot tool with approval on macOS |
@@ -212,7 +212,7 @@ New installs start in **No project**, an isolated `~/.grokky/no-project` scratch
 ### Prerequisites
 
 - Apple Silicon macOS or Windows x64
-- Node.js 20.19 or newer
+- Node.js 22.19 or newer
 - npm 10 or newer
 - A saved Codex sign-in, an OpenRouter key, or both
 
@@ -412,7 +412,7 @@ The capability manager reads the active Codex configuration and presents three d
 - **MCP servers** discovers `[mcp_servers.*]` tables and preserves whether each server is local, remote, or otherwise configured.
 - **Connectors** discovers `[plugins.*]` entries.
 
-Toggles update only the relevant `enabled` field or skill config block in `$HOME/.codex/config.toml`. Writes are atomic and preserve unrelated configuration. These capabilities currently feed Codex runs. OpenRouter uses Grokky's built-in bounded tools and does not yet consume Codex skills, MCP servers, or connectors.
+Toggles update only the relevant `enabled` field or skill config block in `$HOME/.codex/config.toml`. Writes are atomic and preserve unrelated configuration. Skills and connector plugins remain native Codex capabilities. OpenRouter can use enabled MCP servers through Grokky's audited main-process gateway, but it does not serialize Codex skills or connector runtimes into model prompts.
 
 ## Computer access model
 
@@ -464,7 +464,7 @@ Add `--allow-write` only if the runner may accept workspace-write requests. Add 
 > [!WARNING]
 > Bind the runner only to loopback or an authenticated private network such as Tailscale. The built-in compatibility runner speaks HTTP and relies on the private transport for encryption. Never expose it directly to the public internet.
 
-The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. It is proven through an in-process fault transport before a network deployment is enabled. Provider and MCP credentials remain on the host; the desktop retains only its revocable encrypted pairing credential.
+The agent-host protocol builds on that compatibility path with idempotent jobs, a local spool, ordered signed events, cursor reconciliation, approvals, cancellation, and lease-epoch fencing. Its authenticated network transport is covered by deterministic loopback and fault-injection tests. The ordinary `npm run runner` command still starts the files-and-commands compatibility runner; provisioning real host harness handlers and credentials is an explicit deployment step. Provider and MCP credentials remain on that host; the desktop retains only its revocable encrypted pairing credential.
 
 Agent computer sessions add independently addressed browser pages or non-root desktop sessions behind that same host protocol. Every screen and input event is bound to one lease. Browser pages may share logins that the operator approved, and all sessions share one user-scoped trust boundary. The interface deliberately does not describe them as sandboxes or tenant isolation. Human takeover pauses agent input and keeps password, passkey, two-factor, CAPTCHA, and payment-confirmation content out of model traces.
 
@@ -617,7 +617,7 @@ Open the latest completed green `main` workflow run. Pull-request runs verify so
 - Packaged targets are Apple Silicon macOS and Windows x64.
 - Native screen and Accessibility automation are macOS-only.
 - Codex skills, MCP servers, and connectors do not automatically become OpenRouter tools.
-- The remote runner supports bounded file and command capabilities, not remote screen or UI automation.
+- The ordinary remote-runner command supports bounded file and command capabilities. Agent-host jobs and screen sessions have versioned transports and tested reference providers, but require an explicitly provisioned host; they are not enabled by the compatibility-runner CLI.
 - OpenRouter web research currently uses a dedicated research model constant before final synthesis.
 - Verify-workflow packages are unsigned development artifacts; only tagged release-workflow packages are distributable.
 

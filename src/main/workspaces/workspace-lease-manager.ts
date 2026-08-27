@@ -96,7 +96,24 @@ export class WorkspaceLeaseManager {
     return this.enqueue(async () => {
       const lease = this.value.leases.find((entry) => entry.id === leaseId);
       if (!lease) throw new Error("Workspace lease was not found");
-      lease.status = "integrated";
+      if (lease.kind === "git" && lease.writable) {
+        try {
+          const repository = await GitRepository.open(lease.root);
+          if (await repository.status(lease.root)) {
+            lease.status = "recovery";
+            lease.recoveryReason = "Integrated branch still has uncommitted work and was retained for recovery.";
+          } else {
+            await this.worktrees.removeClean(repository, lease.root);
+            lease.status = "integrated";
+            delete lease.recoveryReason;
+          }
+        } catch (error) {
+          lease.status = "recovery";
+          lease.recoveryReason = `Integrated worktree cleanup failed and needs operator recovery: ${error instanceof Error ? error.message : "unknown error"}`;
+        }
+      } else {
+        lease.status = "integrated";
+      }
       lease.updatedAt = this.now();
       await this.commit();
     });

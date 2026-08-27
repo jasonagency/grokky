@@ -21,11 +21,25 @@ export function TaskControlRoom({ snapshot, onError }: { snapshot: AppSnapshot; 
     try {
       const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
       const taskId = `task-${suffix}`;
+      const active = snapshot.conversations.find((conversation) => conversation.id === snapshot.activeConversationId) ?? snapshot.conversations[0];
       await window.grokky.createTaskGoal({
         id: `goal-${suffix}`,
         title: title.trim(),
         objective: objective.trim(),
-        nodes: [{ id: taskId, title: title.trim(), description: objective.trim(), priority: 0 }],
+        nodes: [{
+          id: taskId,
+          title: title.trim(),
+          description: objective.trim(),
+          priority: 0,
+          assignment: active ? {
+            sourceConversationId: active.id,
+            workspace: active.workingDirectory,
+            workspaceMode: active.sandboxMode === "workspace-write" ? "write" : "read",
+            ...(active.harnessId ? { harnessId: active.harnessId } : {}),
+            ...(active.model ? { model: active.model } : {}),
+            ...(active.selectedAgentIds[0] ? { agentId: active.selectedAgentIds[0] } : {}),
+          } : {},
+        }],
       });
       setSelectedTaskId(taskId);
       setTitle("");
@@ -63,7 +77,17 @@ export function TaskControlRoom({ snapshot, onError }: { snapshot: AppSnapshot; 
               }
             }}
           />
-          <WorkspaceLeasePanel taskId={selectedTask?.id} state={snapshot.workspaceState} />
+          <WorkspaceLeasePanel
+            taskId={selectedTask?.id}
+            state={snapshot.workspaceState}
+            busy={busy}
+            onIntegrate={async (leaseId, targetRef) => {
+              setBusy(true);
+              try { await window.grokky.integrateTaskWorkspace(leaseId, targetRef); }
+              catch (error) { onError(error instanceof Error ? error.message : "Workspace integration failed"); }
+              finally { setBusy(false); }
+            }}
+          />
           <LiveControls
             task={selectedTask}
             commands={snapshot.controlRuntime?.commands ?? []}

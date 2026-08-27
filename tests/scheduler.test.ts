@@ -114,6 +114,24 @@ describe("task scheduler", () => {
     expect(setup.scheduler.snapshot().tasks[0]?.status).toBe("succeeded");
   });
 
+  test("fences an active task when the operator pauses it", async () => {
+    const setup = scheduler(undefined, 1);
+    await setup.scheduler.initialize();
+    await setup.scheduler.createGoal({
+      id: "goal-interrupt",
+      title: "Interrupt",
+      objective: "Fence active work",
+      nodes: [{ id: "active", title: "Active" }],
+    });
+    const [claim] = await setup.scheduler.claimReady();
+    await setup.scheduler.start(claim!.task.id, claim!.lease.id);
+
+    await setup.scheduler.interrupt(claim!.task.id, claim!.lease.id, "paused");
+
+    expect(setup.scheduler.snapshot().tasks[0]).toMatchObject({ status: "paused", lease: undefined });
+    await expect(setup.scheduler.complete(claim!.task.id, claim!.lease.id, { summary: "Stale result" })).rejects.toThrow("stale");
+  });
+
   test("reconciles live lease expiry before claiming capacity and fences stale completion", async () => {
     const setup = scheduler(undefined, 1);
     await setup.scheduler.initialize();

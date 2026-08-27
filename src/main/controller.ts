@@ -24,6 +24,7 @@ import type {
   AgentMailboxMessage,
   AgentMemory,
   AgentRoutine,
+  UsageSummary,
 } from "../shared/contracts";
 import { CODEX_MODELS, DEFAULT_OPENROUTER_MODEL, DEFAULT_PI_MODEL, IPC } from "../shared/contracts";
 import { requiresDevelopmentCommands, requiresProjectDirectory } from "../shared/run-preflight";
@@ -31,7 +32,7 @@ import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
 import { capabilityForTool, ComputerAccessService, newAuditId, targetForTool, type ComputerToolName } from "./computer-access";
 import type { ProviderEvent } from "./providers/types";
-import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, ControlPolicyPatch, EvalMetricSet, EvalVerificationRule, IntegrationRecord, ReplayRequest, RouteDecision, TaskAction, TaskControlRequest, TaskGoalDraft, TraceBundle, TraceQuery, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
+import type { BudgetDecision, BudgetMeasurements, ControlPlaneEventType, ControlPolicyPatch, EvalMetricSet, EvalVerificationRule, IntegrationRecord, ReplayRequest, RouteDecision, TaskAction, TaskControlRequest, TaskGoalDraft, TaskLeaseClaim, TraceBundle, TraceQuery, WorkspaceLease, WorkspaceLeaseRequest } from "../shared/control-plane-contracts";
 import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { LeaseReconciler } from "./control-plane/lease-reconciler";
@@ -105,6 +106,10 @@ export class MainController {
   private readonly approvalResolvers = new Map<string, (decision: ComputerApprovalDecision) => void>();
   private readonly sessionComputerGrants = new Map<string, Set<ComputerCapabilityId>>();
   private routineTimer?: ReturnType<typeof setInterval>;
+  private taskDispatchTimer?: ReturnType<typeof setInterval>;
+  private taskDispatchPromise?: Promise<void>;
+  private readonly taskControllers = new Map<string, AbortController>();
+  private readonly taskSessions = new Map<string, string>();
   private readonly capabilities: CapabilitiesService;
   private readonly agents: AgentService;
   private unsubscribeProjection?: () => void;
@@ -155,11 +160,15 @@ export class MainController {
       await this.teamRuntime.initialize();
       await this.teamRuntime.importDefinitions(await this.agents.list(this.activeWorkingDirectory()));
     }
-    await this.dispatchDueRoutines();
-    if (this.routines) this.routineTimer = setInterval(() => { void this.dispatchDueRoutines().catch(() => undefined); }, 60_000);
     await this.refreshProviderStatuses(false);
+    await this.dispatchDueRoutines();
+    if (this.routines) this.routineTimer = setInterval(() => { void this.dispatchDueRoutines().then(() => this.scheduleTaskDispatch()).catch(() => undefined); }, 60_000);
     await this.store.save(this.state);
     this.initialized = true;
+    if (this.taskScheduler) {
+      this.taskDispatchTimer = setInterval(() => this.scheduleTaskDispatch(), 1_000);
+      this.scheduleTaskDispatch();
+    }
     if (this.updates) {
       this.unsubscribeUpdate = this.updates.subscribe(() => this.publishSnapshot());
       await this.updates.initialize(this.state.settings.updateChannel ?? "stable");
@@ -176,14 +185,18 @@ export class MainController {
   }
 
   async shutdown(): Promise<void> {
+    this.initialized = false;
     if (this.routineTimer) clearInterval(this.routineTimer);
+    if (this.taskDispatchTimer) clearInterval(this.taskDispatchTimer);
     this.unsubscribeProjection?.();
     this.unsubscribeProjection = undefined;
     this.unsubscribeUpdate?.();
     this.unsubscribeUpdate = undefined;
     this.updates?.shutdown();
     for (const run of this.runs.values()) run.abort();
+    for (const run of this.taskControllers.values()) run.abort();
     await Promise.allSettled(this.runTasks.values());
+    await this.taskDispatchPromise?.catch(() => undefined);
     await this.harnessRegistry.cleanup();
     await this.toolGateway.close();
   }
@@ -209,15 +222,39 @@ export class MainController {
 
   async createTaskGoal(draft: TaskGoalDraft): Promise<void> {
     if (!this.taskScheduler) throw new Error("The task scheduler is not available");
-    await this.taskScheduler.createGoal(draft);
-    if (this.steering) await Promise.all(draft.nodes.map((node) => this.routeTask(node.id)));
+    const source = this.state.conversations.find((conversation) => conversation.id === this.state.activeConversationId) ?? this.state.conversations[0];
+    const prepared: TaskGoalDraft = {
+      ...structuredClone(draft),
+      nodes: draft.nodes.map((node) => ({
+        ...structuredClone(node),
+        assignment: {
+          ...(source ? {
+            sourceConversationId: source.id,
+            workspace: source.workingDirectory,
+            workspaceMode: source.sandboxMode === "workspace-write" ? "write" as const : "read" as const,
+            ...(!node.assignment?.harnessId || node.assignment.harnessId === source.harnessId ? { model: source.model } : {}),
+          } : {}),
+          ...structuredClone(node.assignment ?? {}),
+        },
+      })),
+    };
+    await this.taskScheduler.createGoal(prepared);
+    if (this.steering) {
+      for (const node of prepared.nodes) {
+        if (node.assignment?.harnessId) continue;
+        const decision = await this.routeTask(node.id);
+        if (decision.status === "rejected") await this.taskScheduler.applyAction(node.id, { type: "pause" });
+      }
+    }
     this.publishSnapshot();
+    this.scheduleTaskDispatch();
   }
 
   async actOnTask(taskId: string, action: TaskAction): Promise<void> {
     if (!this.taskScheduler) throw new Error("The task scheduler is not available");
     await this.taskScheduler.applyAction(taskId, action);
     this.publishSnapshot();
+    this.scheduleTaskDispatch();
   }
 
   async controlTask(taskId: string, request: TaskControlRequest): Promise<void> {
@@ -230,7 +267,16 @@ export class MainController {
         : request.type === "reprioritize" && request.priority !== undefined ? { type: "reprioritize" as const, priority: request.priority }
           : request.type === "stop" ? { type: "cancel" as const }
             : null;
-    if (localAction && task.status !== "leased" && task.status !== "running") {
+    const activeLease = (task.status === "leased" || task.status === "running") ? task.lease : undefined;
+    if (activeLease && (request.type === "pause" || request.type === "stop")) {
+      this.taskControllers.get(taskId)?.abort();
+      await this.taskScheduler.interrupt(taskId, activeLease.id, request.type === "pause" ? "paused" : "canceled");
+      if (task.assignment.harnessId) {
+        const sessionId = this.taskSessions.get(taskId);
+        await this.harnessRegistry.deliverControl(task.assignment.harnessId, { type: "cancel", ...(sessionId ? { sessionId } : {}) }).catch(() => ({ accepted: false }));
+      }
+      await this.steering.deliver(command.id, async () => ({ accepted: true, reason: request.type === "pause" ? "Paused and fenced by the Grokky scheduler" : "Canceled and fenced by the Grokky scheduler" }));
+    } else if (localAction && (!activeLease || request.type === "reprioritize")) {
       await this.taskScheduler.applyAction(taskId, localAction);
       await this.steering.deliver(command.id, async () => ({ accepted: true, reason: "Applied by the Grokky scheduler" }));
     } else if (task.assignment.harnessId) {
@@ -238,9 +284,13 @@ export class MainController {
         : request.type === "redirect" && request.message ? { type: "steer", message: request.message }
           : (request.type === "follow-up" || request.type === "message") && request.message ? { type: "follow-up", message: request.message }
             : null;
-      if (control) await this.steering.deliver(command.id, () => this.harnessRegistry.deliverControl(task.assignment.harnessId!, control));
+      if (control) {
+        const sessionId = this.taskSessions.get(taskId);
+        await this.steering.deliver(command.id, () => this.harnessRegistry.deliverControl(task.assignment.harnessId!, { ...control, ...(sessionId ? { sessionId } : {}) }));
+      }
     }
     this.publishSnapshot();
+    this.scheduleTaskDispatch();
   }
 
   async updateControlPolicies(patch: ControlPolicyPatch): Promise<void> {
@@ -328,11 +378,17 @@ export class MainController {
   async routeTask(taskId: string): Promise<RouteDecision> {
     if (!this.steering || !this.taskScheduler) throw new Error("Task routing is not available");
     const runtime = this.steering.snapshot();
-    const decision = new PolicyEngine().route(this.harnesses, runtime.routingPolicy);
+    const task = this.taskScheduler.snapshot().tasks.find((entry) => entry.id === taskId);
+    if (!task) throw new Error("Task was not found");
+    const decision = new PolicyEngine().route(this.harnesses, {
+      ...runtime.routingPolicy,
+      requiredCapabilities: {
+        ...runtime.routingPolicy.requiredCapabilities,
+        ...this.taskRequiredCapabilities(task.assignment.requiredCapabilities),
+      },
+    });
     await this.steering.repository.mutate((value) => { value.routeDecisions.push({ ...decision, taskId }); });
     if (decision.status === "selected") {
-      const task = this.taskScheduler.snapshot().tasks.find((entry) => entry.id === taskId);
-      if (!task) throw new Error("Task was not found");
       await this.taskScheduler.applyAction(taskId, { type: "assign", assignment: { ...task.assignment, harnessId: decision.harnessId, model: decision.model } });
     }
     return decision;
@@ -787,15 +843,272 @@ export class MainController {
     for (const { routine, occurrenceKey } of occurrences) {
       const prefix = occurrenceKey.replace(/[^a-zA-Z0-9:_-]/g, "-");
       const idMap = new Map(routine.template.nodes.map((node) => [node.id, `${prefix}:${node.id}`]));
-      await this.taskScheduler.createGoal({
-        ...structuredClone(routine.template),
-        id: prefix,
-        title: `${routine.name} · ${new Date(routine.nextFireAt).toLocaleDateString()}`,
-        nodes: routine.template.nodes.map((node) => ({ ...structuredClone(node), id: idMap.get(node.id)!, dependsOn: (node.dependsOn ?? []).map((id) => idMap.get(id) ?? id), assignment: { ...node.assignment, agentId: node.assignment?.agentId ?? routine.ownerAgentId } })),
-      });
-      await this.notifications?.notify({ type: "routine-due", title: `Routine started: ${routine.name}`, body: "A scheduled task graph was queued.", taskId: idMap.values().next().value });
+      const alreadyQueued = this.taskScheduler.snapshot().goals.some((goal) => goal.id === prefix);
+      if (!alreadyQueued) {
+        await this.taskScheduler.createGoal({
+          ...structuredClone(routine.template),
+          id: prefix,
+          title: `${routine.name} · ${new Date(routine.nextFireAt).toLocaleDateString()}`,
+          nodes: routine.template.nodes.map((node) => ({ ...structuredClone(node), id: idMap.get(node.id)!, dependsOn: (node.dependsOn ?? []).map((id) => idMap.get(id) ?? id), assignment: { ...node.assignment, agentId: node.assignment?.agentId ?? routine.ownerAgentId } })),
+        });
+      }
+      await this.routines.acknowledge(routine.id, occurrenceKey);
+      if (!alreadyQueued) await this.notifications?.notify({ type: "routine-due", title: `Routine started: ${routine.name}`, body: "A scheduled task graph was queued.", taskId: idMap.values().next().value });
     }
     if (occurrences.length) this.publishSnapshot();
+  }
+
+  private scheduleTaskDispatch(): void {
+    if (!this.initialized || !this.taskScheduler || this.taskDispatchPromise) return;
+    const run = this.taskScheduler.dispatchReady((claim) => this.executeTaskClaim(claim)).then(async (results) => {
+      for (const result of results) {
+        const currentStatus = this.taskScheduler?.snapshot().tasks.find((task) => task.id === result.taskId)?.status;
+        if (result.status === "failed" && currentStatus !== "paused" && currentStatus !== "canceled") {
+          await this.notifications?.notify({
+            type: "task-terminal",
+            title: "Task needs attention",
+            body: result.error ?? "A task run failed.",
+            taskId: result.taskId,
+          });
+        }
+      }
+      if (results.length) this.publishSnapshot();
+    }).finally(() => {
+      if (this.taskDispatchPromise === run) this.taskDispatchPromise = undefined;
+      if (this.initialized && this.taskScheduler?.snapshot().tasks.some((task) => task.status === "queued")) {
+        queueMicrotask(() => this.scheduleTaskDispatch());
+      }
+    });
+    this.taskDispatchPromise = run;
+  }
+
+  private async executeTaskClaim(claim: TaskLeaseClaim): Promise<{ summary: string }> {
+    if (!this.workspaceLeases) throw new Error("Workspace isolation is required to execute task graphs");
+    const assignment = claim.task.assignment;
+    const source = this.state.conversations.find((conversation) => conversation.id === assignment.sourceConversationId)
+      ?? this.state.conversations.find((conversation) => conversation.id === this.state.activeConversationId)
+      ?? this.state.conversations[0];
+    if (!source) throw new Error("Task execution requires a source conversation");
+    const harnessId = assignment.harnessId ?? source.harnessId;
+    if (!harnessId) throw new Error("Task execution requires an assigned harness");
+    const descriptor = this.harnesses.find((entry) => entry.id === harnessId);
+    if (!descriptor?.health.ready) throw new Error(descriptor?.health.detail || `Harness ${harnessId} is not ready`);
+    const model = assignment.model ?? (source.harnessId === harnessId ? source.model : descriptor.models[0]?.id) ?? "auto";
+    if (!descriptor.models.some((entry) => entry.dynamic || entry.id === model)) throw new Error(`Model ${model} is not supported by harness ${harnessId}`);
+    const workspace = assignment.workspace ?? source.workingDirectory;
+    const workspaceMode = assignment.workspaceMode ?? (source.sandboxMode === "workspace-write" ? "write" : "read");
+    const workspaceLease = await this.workspaceLeases.acquire({
+      taskId: claim.task.id,
+      holderId: claim.lease.attemptId,
+      workspace,
+      mode: workspaceMode,
+    });
+    const now = Date.now();
+    const conversation: Conversation = {
+      ...structuredClone(source),
+      title: claim.task.title,
+      provider: descriptor.providerCompatibility.includes(source.provider) ? source.provider : descriptor.providerCompatibility[0] ?? source.provider,
+      harnessId,
+      model,
+      sandboxMode: workspaceLease.writable ? "workspace-write" : "read-only",
+      allowCommands: workspaceLease.writable && source.allowCommands,
+      projectMode: "project",
+      workingDirectory: workspaceLease.root,
+      threadId: assignment.agentId
+        ? this.teamRuntime?.snapshot().agents.find((agent) => agent.id === assignment.agentId)?.sessionReferences[harnessId]
+        : undefined,
+      messages: [],
+      activities: [],
+      selectedAgentIds: assignment.agentId ? [assignment.agentId] : [],
+      agentRuns: [],
+      crewCommunications: [],
+      harnessAttempts: [],
+      usage: undefined,
+      status: "running",
+      lastRunOutcome: undefined,
+      error: undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const controller = new AbortController();
+    this.taskControllers.set(claim.task.id, controller);
+    const startedAt = Date.now();
+    let heartbeatFailure: Error | undefined;
+    const heartbeat = setInterval(() => {
+      void this.taskScheduler?.heartbeat(claim.task.id, claim.lease.id).catch((error) => {
+        heartbeatFailure = error instanceof Error ? error : new Error("Task lease heartbeat failed");
+        controller.abort();
+      });
+    }, 5_000);
+    let finalText = "";
+    let usage: UsageSummary | undefined;
+    try {
+      if (this.steering) {
+        const decision = await this.evaluateTaskBudget(claim.task.id, {
+          elapsedMs: { value: 0, quality: "authoritative" },
+          concurrency: { value: this.taskScheduler?.snapshot().tasks.filter((task) => task.status === "leased" || task.status === "running").length ?? 1, quality: "authoritative" },
+          retries: { value: Math.max(0, claim.task.attempts.length - 1), quality: "authoritative" },
+        }, true);
+        if (decision.status === "paused" || decision.status === "blocked") throw new Error(decision.reason);
+      }
+      const [agents, capabilities, mcpConfigurations] = await Promise.all([
+        this.agents.selected(conversation.selectedAgentIds, conversation.workingDirectory),
+        this.capabilities.snapshot(conversation.workingDirectory),
+        this.capabilities.mcpServerConfigurations(),
+      ]);
+      const selectedSkillPaths = capabilities.skills.filter((skill) => skill.enabled).map((skill) => skill.path);
+      const preparedMcp = conversation.provider === "openrouter"
+        ? await this.toolGateway.prepare(mcpConfigurations, this.state.settings.mcpToolPolicies ?? {})
+        : { tools: [], results: [] };
+      const prompt = [
+        claim.task.description || claim.task.title,
+        claim.checkpoint ? `Resume from checkpoint: ${claim.checkpoint.cursor}` : "",
+        workspaceLease.kind === "git" && workspaceLease.writable ? "Work only in the assigned isolated worktree. Grokky will checkpoint completed changes into its task branch." : "",
+      ].filter(Boolean).join("\n\n");
+      await this.recordTaskEvent(claim, "run.started", { prompt, workspaceLeaseId: workspaceLease.id, harnessId });
+      await this.harnessRegistry.dispatch(conversation, {
+        conversation,
+        settings: structuredClone(this.state.settings),
+        agents,
+        prompt,
+        signal: controller.signal,
+        selectedSkillPaths,
+        computerAccess: structuredClone(this.state.computerAccess),
+        executeTool: (name, args, options) => this.executeTaskComputerTool(claim, conversation, workspaceLease, name, args, options),
+        controlTask: (taskId, request) => this.controlTask(taskId, request),
+        mcpTools: preparedMcp.tools,
+        executeMcpTool: (name, args, options) => this.executeMcpTool(source.id, mcpConfigurations, name, args, controller.signal, options?.readOnly === true),
+        onEvent: async (event) => {
+          if (event.type === "thread") {
+            this.taskSessions.set(claim.task.id, event.threadId);
+            if (assignment.agentId) await this.teamRuntime?.rememberSession(assignment.agentId, harnessId, event.threadId);
+          } else if (event.type === "final") finalText = event.text;
+          else if (event.type === "usage") {
+            usage = event.usage;
+            if (this.steering) {
+              const quality = descriptor.capabilities.usage;
+              const decision = await this.evaluateTaskBudget(claim.task.id, {
+                tokens: quality === "unavailable" ? { quality } : { value: event.usage.inputTokens + event.usage.outputTokens + (event.usage.reasoningTokens ?? 0), quality },
+                costUsd: event.usage.costUsd === undefined || quality === "unavailable" ? { quality: "unavailable" } : { value: event.usage.costUsd, quality },
+                elapsedMs: { value: Date.now() - startedAt, quality: "authoritative" },
+                concurrency: { value: this.taskScheduler?.snapshot().tasks.filter((task) => task.status === "leased" || task.status === "running").length ?? 1, quality: "authoritative" },
+                retries: { value: Math.max(0, claim.task.attempts.length - 1), quality: "authoritative" },
+              }, true);
+              if (decision.status === "paused" || decision.status === "blocked") throw new Error(decision.reason);
+            }
+          }
+          await this.recordTaskEvent(claim, this.taskEventType(event), this.taskEventPayload(event));
+        },
+      }, {
+        streaming: true,
+        cancellation: true,
+        tools: true,
+        ...this.taskRequiredCapabilities(assignment.requiredCapabilities),
+      });
+      if (heartbeatFailure) throw heartbeatFailure;
+      if (workspaceLease.kind === "git" && workspaceLease.writable) {
+        const commit = await this.checkpointTaskWorkspace(workspaceLease, claim.task.title);
+        if (commit) await this.taskScheduler?.checkpoint(claim.task.id, claim.lease.id, { cursor: `git:${commit}`, recoverable: true });
+      }
+      await this.recordTaskEvent(claim, "run.completed", { outcome: "delivered", ...(usage ? { usage } : {}) });
+      return { summary: (finalText.trim() || `Completed ${claim.task.title}`).slice(0, 4_000) };
+    } catch (error) {
+      await this.recordTaskEvent(claim, controller.signal.aborted ? "run.stopped" : "run.failed", {
+        error: error instanceof Error ? error.message : "Task execution failed",
+      });
+      throw error;
+    } finally {
+      clearInterval(heartbeat);
+      try {
+        await this.workspaceLeases.complete(workspaceLease.id);
+      } catch {
+        // A reconciler may already have fenced the workspace lease after a host failure.
+      }
+      if (this.taskControllers.get(claim.task.id) === controller) this.taskControllers.delete(claim.task.id);
+      this.taskSessions.delete(claim.task.id);
+      this.publishSnapshot();
+    }
+  }
+
+  private async checkpointTaskWorkspace(lease: WorkspaceLease, title: string): Promise<string | undefined> {
+    const repository = await GitRepository.open(lease.root);
+    if (!await repository.status(lease.root)) return undefined;
+    await repository.git(["add", "--all", "--"], { cwd: lease.root });
+    await repository.git([
+      "-c", "user.name=Grokky Agent",
+      "-c", "user.email=grokky-agent@localhost",
+      "commit", "-m", `task: ${title.replace(/\s+/g, " ").trim().slice(0, 160) || "completed work"}`,
+      "--no-verify",
+    ], { cwd: lease.root });
+    return repository.head(lease.root);
+  }
+
+  private async executeTaskComputerTool(
+    claim: TaskLeaseClaim,
+    conversation: Conversation,
+    workspaceLease: WorkspaceLease,
+    name: ComputerToolName,
+    args: Record<string, unknown>,
+    options?: { readOnly?: boolean },
+  ): Promise<string> {
+    const scoped = options?.readOnly ? { ...conversation, sandboxMode: "read-only" as const, allowCommands: false } : conversation;
+    const capability = capabilityForTool(name);
+    const target = targetForTool(name, args);
+    const approvedTarget = await this.authorizeComputerTool(scoped, capability, name, target);
+    try {
+      const output = await this.computerAccess.execute({ state: this.state.computerAccess, conversation: scoped, name, args, approvedTarget, workspaceLease });
+      const audit = this.appendComputerAudit(scoped, capability, name, target, "allowed", "completed", output.slice(0, 2_000));
+      await this.recordTaskEvent(claim, "audit.recorded", { audit });
+      await this.commit();
+      return output;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Computer action failed";
+      const audit = this.appendComputerAudit(scoped, capability, name, target, "allowed", "failed", detail);
+      await this.recordTaskEvent(claim, "audit.recorded", { audit });
+      await this.commit();
+      throw error;
+    }
+  }
+
+  private taskRequiredCapabilities(values: string[] | undefined): RequiredHarnessCapabilities {
+    const required: RequiredHarnessCapabilities = {};
+    for (const value of values ?? []) {
+      if (value === "steering" || value === "steering:follow-up") required.steering = "follow-up";
+      else if (value === "steering:mid-turn") required.steering = "mid-turn";
+      else if (value === "usage") required.usage = "estimated";
+      else if (new Set(["sessionPersistence", "streaming", "cancellation", "tools", "mcp", "computerControl", "multiAgent"]).has(value)) {
+        (required as Record<string, unknown>)[value] = true;
+      } else throw new Error(`Unsupported task harness capability: ${value}`);
+    }
+    return required;
+  }
+
+  private taskEventType(event: ProviderEvent): ControlPlaneEventType {
+    if (event.type === "thread") return "provider.thread";
+    if (event.type === "activity") return "provider.activity";
+    if (event.type === "orchestration") return "orchestration.updated";
+    if (event.type === "usage") return "usage.updated";
+    return "run.final";
+  }
+
+  private taskEventPayload(event: ProviderEvent): unknown {
+    if (event.type === "thread") return { threadId: event.threadId };
+    if (event.type === "activity") return { activity: event.activity };
+    if (event.type === "orchestration") return { event: event.event };
+    if (event.type === "usage") return { usage: event.usage };
+    return { message: { id: id(), role: "assistant", content: event.text, createdAt: Date.now() } };
+  }
+
+  private async recordTaskEvent(claim: TaskLeaseClaim, type: ControlPlaneEventType, payload: unknown): Promise<void> {
+    if (!this.controlPlane) return;
+    await this.controlPlane.record({
+      aggregateId: claim.task.id,
+      taskId: claim.task.id,
+      attemptId: claim.lease.attemptId,
+      source: "grokky.task-dispatcher",
+      type,
+      payload,
+    });
   }
 
   private async executeRun(conversationId: string, prompt: string, controller: AbortController): Promise<void> {

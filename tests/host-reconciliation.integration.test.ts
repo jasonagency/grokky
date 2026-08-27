@@ -62,4 +62,22 @@ describe("remote host reconciliation", () => {
       expect((await client.events(0)).at(-1)?.type).toBe("job.completed");
     } finally { await runner.close(); }
   });
+
+  test("expires pairing codes and rate-limits guesses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "grokky-network-host-"));
+    let now = 1_000;
+    const runner = await startRunnerServer({ root, statePath: join(root, "runner.json"), host: "127.0.0.1", port: 0, pairingCodeTtlMs: 30_000, pairingAttemptLimit: 2, now: () => now });
+    try {
+      const guess = () => fetch(`${runner.endpoint}/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: "invalid" }) });
+      expect((await guess()).status).toBe(403);
+      expect((await guess()).status).toBe(403);
+      expect((await fetch(`${runner.endpoint}/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: runner.code }) })).status).toBe(429);
+    } finally { await runner.close(); }
+
+    const expiring = await startRunnerServer({ root, statePath: join(root, "runner-2.json"), host: "127.0.0.1", port: 0, pairingCodeTtlMs: 30_000, now: () => now });
+    try {
+      now += 30_000;
+      expect((await fetch(`${expiring.endpoint}/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: expiring.code }) })).status).toBe(429);
+    } finally { await expiring.close(); }
+  });
 });

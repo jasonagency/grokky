@@ -117,4 +117,15 @@ describe("remote host updates", () => {
     expect(result).toMatchObject({ status: "incompatible", backupId: "backup-1" });
     expect(adapter.rollback).toHaveBeenCalledWith("backup-1");
   });
+
+  test("does not claim a host backup was restored when rollback fails", async () => {
+    const adapter = {
+      backup: vi.fn(async () => "backup-2"),
+      install: vi.fn(async () => { throw new Error("install failed"); }),
+      healthCheck: vi.fn(async () => ({ healthy: true, protocol: { major: 1, minor: 0 } })),
+      rollback: vi.fn(async () => { throw new Error("restore failed"); }),
+    };
+    await expect(new HostUpdateService(adapter).apply("host-update.pkg")).rejects.toThrow("Rollback backup-2 also failed");
+    expect(adapter.rollback).toHaveBeenCalledOnce();
+  });
 });

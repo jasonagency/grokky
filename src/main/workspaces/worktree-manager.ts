@@ -42,7 +42,7 @@ export class WorktreeManager {
     const pathname = resolve(repositoryRoot, directoryName);
     if (!pathname.startsWith(`${repositoryRoot}/`) && pathname !== repositoryRoot) throw new Error("Invalid worktree path");
     await mkdir(repositoryRoot, { recursive: true });
-    await repository.git(["worktree", "add", "-b", branch, pathname, baseCommit]);
+    await repository.git(["worktree", "add", "-b", branch, "--", pathname, baseCommit]);
     await repository.git(["worktree", "lock", "--reason", "Grokky workspace lease", pathname]);
     return { path: pathname, branch, baseCommit };
   }

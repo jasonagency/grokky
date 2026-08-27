@@ -10,6 +10,10 @@ import type {
 
 const TERMINAL = new Set<TaskNodeStatus>(["succeeded", "failed", "canceled"]);
 const ACTIVE = new Set<TaskNodeStatus>(["leased", "running"]);
+const TASK_CAPABILITIES = new Set([
+  "sessionPersistence", "streaming", "steering", "steering:follow-up", "steering:mid-turn",
+  "cancellation", "tools", "mcp", "usage", "computerControl", "multiAgent",
+]);
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -44,10 +48,12 @@ function requirePriority(value: unknown): number {
 function requireAssignment(assignment: unknown): TaskNode["assignment"] {
   if (!isRecord(assignment)) throw new Error("Invalid task assignment");
   const next = clone(assignment) as TaskNode["assignment"];
-  for (const value of [next.agentId, next.harnessId, next.model]) {
+  for (const value of [next.agentId, next.harnessId, next.model, next.sourceConversationId]) {
     if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 240)) throw new Error("Invalid task assignment");
   }
-  if (next.requiredCapabilities && (!Array.isArray(next.requiredCapabilities) || next.requiredCapabilities.length > 50 || next.requiredCapabilities.some((value) => typeof value !== "string" || !value.trim() || value.length > 100))) {
+  if (next.workspace !== undefined && (typeof next.workspace !== "string" || !next.workspace.trim() || next.workspace.length > 4_000)) throw new Error("Invalid task workspace");
+  if (next.workspaceMode !== undefined && next.workspaceMode !== "read" && next.workspaceMode !== "write") throw new Error("Invalid task workspace mode");
+  if (next.requiredCapabilities && (!Array.isArray(next.requiredCapabilities) || next.requiredCapabilities.length > 50 || next.requiredCapabilities.some((value) => typeof value !== "string" || !TASK_CAPABILITIES.has(value)))) {
     throw new Error("Invalid required task capabilities");
   }
   return next;

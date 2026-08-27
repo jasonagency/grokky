@@ -10,15 +10,21 @@ interface UpdateBannerProps {
   onError?: (message: string) => void;
 }
 
+function updateTitle(update: UpdateSnapshot): string {
+  switch (update.status) {
+    case "available": return `Grokky ${update.info?.version} is available`;
+    case "downloading": return `Downloading Grokky ${update.info?.version ?? "update"}`;
+    case "downloaded": return `Grokky ${update.info?.version} is ready`;
+    case "blocked": return "Update is ready when work reaches a safe checkpoint";
+    default: return "Grokky could not verify the update";
+  }
+}
+
 export function UpdateBanner({ update, onDownload, onInstall, onCheck, onOpenDetails, onError }: UpdateBannerProps) {
   const [busy, setBusy] = useState(false);
   if (!update || update.status === "idle" || update.status === "checking") return null;
 
-  const title = update.status === "available" ? `Grokky ${update.info?.version} is available`
-    : update.status === "downloading" ? `Downloading Grokky ${update.info?.version ?? "update"}`
-      : update.status === "downloaded" ? `Grokky ${update.info?.version} is ready`
-        : update.status === "blocked" ? "Update is ready when work reaches a safe checkpoint"
-          : "Grokky could not verify the update";
+  const title = updateTitle(update);
   const action = update.status === "available" ? { label: "Download", run: onDownload }
     : update.status === "downloaded" || update.status === "blocked" ? { label: "Restart to update", run: onInstall }
       : update.status === "error" ? { label: "Check again", run: onCheck }

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 
 export const REMOTE_PROTOCOL = { major: 1, minor: 0 } as const;
 export const MAX_REMOTE_FRAME_BYTES = 256 * 1024;
@@ -119,8 +120,10 @@ export interface ScreenInput { type: "click" | "key" | "scroll"; x?: number; y?:
 function unsigned(frame: Omit<RemoteEventFrame, "signature">): string { return JSON.stringify(frame); }
 
 export function signRemoteFrame(frame: Omit<RemoteEventFrame, "signature">, credential: string): RemoteEventFrame {
-  if (Buffer.byteLength(unsigned(frame), "utf8") > MAX_REMOTE_FRAME_BYTES) throw new Error("Remote frame exceeds the size limit");
-  return { ...frame, signature: createHmac("sha256", credential).update(unsigned(frame)).digest("base64url") };
+  const content = unsigned(frame);
+  const signed = { ...frame, signature: createHmac("sha256", credential).update(content).digest("base64url") };
+  if (Buffer.byteLength(JSON.stringify(signed), "utf8") > MAX_REMOTE_FRAME_BYTES) throw new Error("Remote frame exceeds the size limit");
+  return signed;
 }
 
 export function verifyRemoteFrame(frame: RemoteEventFrame, credential: string): void {
@@ -140,7 +143,8 @@ export function assertCompatibleProtocol(remote: { major: number; minor: number 
 export function assertSecureRemoteEndpoint(endpoint: string): string {
   const url = new URL(endpoint);
   const loopback = new Set(["localhost", "127.0.0.1", "::1"]).has(url.hostname);
-  const privateOverlay = /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])\.)/.test(url.hostname);
+  const privateOverlay = isIP(url.hostname) === 4
+    && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])\.)/.test(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && (loopback || privateOverlay))) throw new Error("Remote host requires HTTPS or authenticated private-overlay transport");
   if (url.username || url.password) throw new Error("Remote host URL must not contain credentials");
   return url.toString().replace(/\/$/, "");
