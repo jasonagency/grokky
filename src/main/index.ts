@@ -12,6 +12,7 @@ import { IPC } from "../shared/contracts";
 
 let mainWindow: BrowserWindow | null = null;
 let stateStore: StateStore | null = null;
+let mainController: MainController | null = null;
 let databaseClosed = false;
 let databaseClosing = false;
 
@@ -70,6 +71,7 @@ app.whenReady().then(async () => {
     }),
     new ControlPlaneService(database),
   );
+  mainController = controller;
   await controller.initialize();
   registerIpc(controller);
   await createWindow(controller);
@@ -706,7 +708,9 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (databaseClosing) return;
   databaseClosing = true;
-  void stateStore.close()
+  const shutdown = mainController ? mainController.shutdown() : Promise.resolve();
+  void shutdown
+    .then(() => stateStore?.close())
     .catch((error) => console.error("Failed to close the control-plane database", error))
     .finally(() => {
       databaseClosed = true;

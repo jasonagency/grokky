@@ -42,6 +42,7 @@ flowchart LR
     AGENTS[AgentService]
     CAPS[CapabilitiesService]
     ACCESS[ComputerAccessService]
+    REGISTRY[Harness registry]
     CODEXPROVIDER[Codex provider]
     ORPROVIDER[OpenRouter provider]
   end
@@ -54,8 +55,9 @@ flowchart LR
   CONTROLLER --> AGENTS
   CONTROLLER --> CAPS
   CONTROLLER --> ACCESS
-  CONTROLLER --> CODEXPROVIDER
-  CONTROLLER --> ORPROVIDER
+  CONTROLLER --> REGISTRY
+  REGISTRY --> CODEXPROVIDER
+  REGISTRY --> ORPROVIDER
 ```
 
 The renderer runs with:
@@ -75,9 +77,10 @@ The renderer receives complete application snapshots. It never receives a provid
 | Shared contracts | `src/shared/contracts.ts` | Serializable domain types, provider IDs, IPC names, UI snapshots |
 | Runtime validation | `src/shared/validation.ts` | Validate every renderer-controlled IPC payload |
 | Preload | `src/preload/index.ts` | Convert the allowlisted API into `ipcRenderer.invoke` calls |
-| Controller | `src/main/controller.ts` | Coordinate conversations, providers, tools, state, cancellation, and snapshots |
-| Codex adapter | `src/main/providers/codex-provider.ts` | Configure SDK threads and normalize SDK events |
-| OpenRouter adapter | `src/main/providers/openrouter-provider.ts` | Run chat, tools, web research, and crew synthesis |
+| Controller | `src/main/controller.ts` | Coordinate conversations, harness requirements, tools, state, cancellation, and snapshots |
+| Harness registry | `src/main/harnesses` | Resolve legacy provider selections, negotiate capabilities, validate events, and dispatch versioned adapters |
+| Codex compatibility adapter | `src/main/harnesses/codex-sdk-adapter.ts` | Describe SDK capabilities and wrap the existing Codex provider |
+| OpenRouter compatibility adapter | `src/main/harnesses/openrouter-adapter.ts` | Resolve credentials and wrap the existing OpenRouter provider |
 | Access gate | `src/main/computer-access.ts` | Resolve policy, approvals, target device, browser safety, and audit |
 | Workspace tools | `src/main/workspace-tools.ts` | Enforce path, file, edit, and command boundaries |
 | Native host | `src/main/computer-host-electron.ts` | Screen capture, Accessibility actions, and encrypted token storage |
@@ -91,7 +94,7 @@ The renderer receives complete application snapshots. It never receives a provid
 
 ## Snapshot state model
 
-The main process is authoritative. React does not optimistically own durable conversation state. During the U1 compatibility release, `StateStore` reads and writes one normalized snapshot inside SQLite while the normalized tables and event schema are established for later projection ownership.
+The main process is authoritative. React does not optimistically own durable conversation state. `StateStore` continues to write a compatibility snapshot while ordered events and projections take ownership of run history.
 
 Run history now also flows through stable, append-only control-plane events. Each aggregate has a monotonic sequence; duplicate event IDs are idempotent, and sequence gaps are quarantined as diagnostics. The storage worker commits an event, its conversation projection, and any content-addressed artifact in one transaction. On restart, the projector can rebuild its bounded active-run view from events and referenced artifacts alone. The renderer receives sanitized projection changes over a dedicated IPC channel and retains full snapshot retrieval for startup and gap recovery.
 

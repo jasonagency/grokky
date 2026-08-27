@@ -100,6 +100,7 @@ export function boundedConversationProjection(conversation: Conversation): Conve
     activities: conversation.activities.slice(-80).map((activity) => ({ ...activity, ...(activity.detail ? { detail: activity.detail.slice(0, 12_000) } : {}) })),
     agentRuns: conversation.agentRuns.slice(-40).map((run) => ({ ...run, ...(run.result ? { result: run.result.slice(0, 12_000) } : {}) })),
     crewCommunications: conversation.crewCommunications.slice(-80).map((entry) => ({ ...entry, ...(entry.content ? { content: entry.content.slice(0, 12_000) } : {}) })),
+    harnessAttempts: conversation.harnessAttempts?.slice(-40),
   };
   while (bounded.messages.length > 1 && Buffer.byteLength(JSON.stringify(bounded), "utf8") > 220 * 1024) bounded.messages.shift();
   while (bounded.activities.length > 1 && Buffer.byteLength(JSON.stringify(bounded), "utf8") > 220 * 1024) bounded.activities.shift();

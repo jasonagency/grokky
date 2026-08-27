@@ -208,6 +208,8 @@ The first SQLite launch may read the previous `conversations.json` file. Grokky 
 
 Control-plane events use stable IDs and per-aggregate sequences. Duplicate IDs do not reapply a projection, and a sequence gap is stored as a bounded diagnostic rather than mutating live state. Renderer projection messages contain only bounded UI contracts and never database handles, worker commands, or credential sources. Event payloads larger than 48 KiB become SHA-256-addressed SQLite artifacts capped at 2 MiB with retention metadata; projection content is independently truncated before IPC delivery.
 
+Harness adapters register stable IDs, versions, readiness, and explicit capabilities. The registry rejects duplicate IDs and incompatible assignments before provider code runs. Every adapter event is shape-validated and capped before it can enter the event store. Credential resolution stays inside the adapter and main process; registry snapshots expose labels and source descriptions, not secret values.
+
 Local state contains private information, including messages, workspace paths, provider selection, selected agents, activity details, audit targets, and remote endpoint metadata. It is not committed, but any local backup or device-management system may copy it.
 
 Deleting a conversation removes it from Grokky's state after cancelling active work. It does not securely erase prior filesystem blocks or copies held by backups, provider services, Codex home data, or workspace version history.

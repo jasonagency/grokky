@@ -1206,6 +1206,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
     { label: "Orchestration", items: navItems.slice(2, 4) },
     { label: "Extensions", items: navItems.slice(4, 6) },
   ];
+  const activeHarness = snapshot.harnesses.find((harness) => harness.id === conversation.harnessId)
+    ?? snapshot.harnesses.find((harness) => harness.providerCompatibility.includes(conversation.provider));
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
@@ -1261,6 +1263,21 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, onAgentsCh
                   <span className="settings-copy"><strong>Workspace permission</strong><small>Control whether Grokky can edit files.</small></span>
                   <SelectMenu value={conversation.sandboxMode} choices={SANDBOX_CHOICES} label="Workspace permission" disabled={conversation.status === "running"} onChange={(sandboxMode) => void patchConversation({ sandboxMode })} />
                 </div>
+                {activeHarness && (
+                  <div className="settings-row">
+                    <span className="settings-copy">
+                      <strong>{activeHarness.displayName} <small>v{activeHarness.version}</small></strong>
+                      <small>{[
+                        activeHarness.capabilities.streaming && "streaming",
+                        activeHarness.capabilities.cancellation && "cancel",
+                        activeHarness.capabilities.multiAgent && "multi-agent",
+                        activeHarness.capabilities.mcp && "MCP",
+                        activeHarness.capabilities.computerControl && "computer control",
+                      ].filter(Boolean).join(" · ")}</small>
+                    </span>
+                    <em className={`device-status ${activeHarness.health.ready ? "online" : "offline"}`}>{activeHarness.health.ready ? "ready" : "unavailable"}</em>
+                  </div>
+                )}
                 <div className={`settings-row ${conversation.sandboxMode === "read-only" ? "disabled" : ""}`}>
                   <span className="settings-copy"><strong>Development commands</strong><small>Allow build and test commands for OpenRouter sessions.</small></span>
                   <Switch checked={conversation.allowCommands} disabled={conversation.sandboxMode === "read-only" || conversation.status === "running"} label="Development commands" onChange={(checked) => void patchConversation({ allowCommands: checked })} />

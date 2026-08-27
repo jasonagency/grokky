@@ -9,6 +9,7 @@ import type {
   Conversation,
   CrewCommunication,
 } from "../shared/contracts";
+import type { HarnessAttempt } from "../shared/harness-contracts";
 import { DirectDatabaseClient } from "./storage/database-client";
 import type { ControlPlaneDatabase } from "./storage/database-types";
 import { readLegacyState } from "./storage/legacy-import";
@@ -233,10 +234,34 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
     ? item.projectMode
     : inferredProjectMode;
   const runOutcomes = new Set<NonNullable<Conversation["lastRunOutcome"]>>(["delivered", "blocked", "failed", "stopped"]);
+  const provider = item.provider === "openrouter" ? "openrouter" : "codex";
+  const harnessAttempts = Array.isArray(item.harnessAttempts)
+    ? item.harnessAttempts.flatMap((value): HarnessAttempt[] => {
+        if (!value || typeof value !== "object") return [];
+        const attempt = value as Partial<HarnessAttempt>;
+        if (
+          typeof attempt.id !== "string"
+          || typeof attempt.harnessId !== "string"
+          || typeof attempt.adapterVersion !== "string"
+          || !["running", "completed", "failed", "stopped"].includes(attempt.status ?? "")
+          || typeof attempt.startedAt !== "number"
+        ) return [];
+        return [{
+          id: attempt.id,
+          harnessId: attempt.harnessId,
+          adapterVersion: attempt.adapterVersion,
+          status: attempt.status as HarnessAttempt["status"],
+          ...(attempt.session && typeof attempt.session.nativeSessionId === "string" ? { session: attempt.session } : {}),
+          startedAt: attempt.startedAt,
+          ...(typeof attempt.endedAt === "number" ? { endedAt: attempt.endedAt } : {}),
+        }];
+      }).slice(-40)
+    : [];
   return {
     id: item.id,
     title: item.title,
-    provider: item.provider === "openrouter" ? "openrouter" : "codex",
+    provider,
+    harnessId: typeof item.harnessId === "string" ? item.harnessId : provider === "codex" ? "codex-sdk" : "openrouter-chat",
     model: typeof item.model === "string" ? item.model : "gpt-5.6-sol",
     reasoning: ["low", "medium", "high", "xhigh"].includes(item.reasoning ?? "") ? item.reasoning! : "medium",
     sandboxMode: item.sandboxMode === "read-only" ? "read-only" : "workspace-write",
@@ -255,6 +280,7 @@ function normalizeConversation(value: unknown, homeDirectory: string): Conversat
     crewCommunications: Array.isArray(item.crewCommunications)
       ? item.crewCommunications.map(normalizeCrewCommunication).filter((entry): entry is CrewCommunication => Boolean(entry)).slice(-80)
       : [],
+    harnessAttempts,
     ...(item.usage ? { usage: item.usage } : {}),
     status: "idle",
     ...(runOutcomes.has(item.lastRunOutcome as NonNullable<Conversation["lastRunOutcome"]>) ? { lastRunOutcome: item.lastRunOutcome } : {}),

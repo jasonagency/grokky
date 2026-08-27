@@ -26,14 +26,13 @@ import { requiresDevelopmentCommands, requiresProjectDirectory } from "../shared
 import { CapabilitiesService } from "./capabilities";
 import { AgentService } from "./agents";
 import { capabilityForTool, ComputerAccessService, newAuditId, targetForTool, type ComputerToolName } from "./computer-access";
-import { providerStatuses, resolveOpenRouterCredential } from "./credentials";
-import { runCodex } from "./providers/codex-provider";
-import { runOpenRouter } from "./providers/openrouter-provider";
 import type { ProviderEvent } from "./providers/types";
 import type { ControlPlaneEventType } from "../shared/control-plane-contracts";
+import type { HarnessAttempt, HarnessRegistryEntry, RequiredHarnessCapabilities } from "../shared/harness-contracts";
 import { ControlPlaneService } from "./control-plane/control-plane-service";
 import { boundedConversationProjection } from "./control-plane/event-projector";
 import { communicationsFromOrchestrationEvent, mergeCrewCommunications } from "./crew-communications";
+import { createDefaultHarnessRegistry, HarnessRegistry } from "./harnesses/registry";
 import { noProjectDirectory, StateStore, type PersistentState } from "./state-store";
 
 function id(): string {
@@ -70,8 +69,10 @@ export function classifyRunOutcome(conversation: Conversation, selectedAgentCoun
 export class MainController {
   private state!: PersistentState;
   private statuses: ProviderStatus[] = [];
+  private harnesses: HarnessRegistryEntry[] = [];
   private window: BrowserWindow | null = null;
   private readonly runs = new Map<string, AbortController>();
+  private readonly runTasks = new Map<string, Promise<void>>();
   private readonly runIds = new Map<string, string>();
   private readonly runAgentIcons = new Map<string, Map<string, AgentIcon>>();
   private readonly pendingApprovals: ComputerApprovalRequest[] = [];
@@ -87,6 +88,7 @@ export class MainController {
     private readonly appVersion: string,
     private readonly computerAccess = new ComputerAccessService(),
     private readonly controlPlane?: ControlPlaneService,
+    private readonly harnessRegistry: HarnessRegistry = createDefaultHarnessRegistry(homeDirectory),
   ) {
     this.capabilities = new CapabilitiesService(homeDirectory);
     this.agents = new AgentService(homeDirectory);
@@ -96,12 +98,6 @@ export class MainController {
     this.state = await this.store.load();
     await this.controlPlane?.initialize({ conversations: this.state.conversations });
     await mkdir(noProjectDirectory(this.homeDirectory), { recursive: true });
-    if (!this.state.settings.openRouterCredentialPath) {
-      const credential = await resolveOpenRouterCredential(this.state.settings, this.homeDirectory);
-      if (credential && credential.source !== "Process environment") {
-        this.state.settings.openRouterCredentialPath = credential.source;
-      }
-    }
     if (!this.state.conversations.length) this.createConversationInternal();
     await this.refreshProviderStatuses(false);
     await this.store.save(this.state);
@@ -116,6 +112,14 @@ export class MainController {
     this.publishSnapshot();
   }
 
+  async shutdown(): Promise<void> {
+    this.unsubscribeProjection?.();
+    this.unsubscribeProjection = undefined;
+    for (const run of this.runs.values()) run.abort();
+    await Promise.allSettled(this.runTasks.values());
+    await this.harnessRegistry.cleanup();
+  }
+
   snapshot(): AppSnapshot {
     return structuredClone({
       conversations: [...this.state.conversations]
@@ -124,6 +128,7 @@ export class MainController {
       ...(this.state.activeConversationId ? { activeConversationId: this.state.activeConversationId } : {}),
       settings: this.state.settings,
       providerStatuses: this.statuses,
+      harnesses: this.harnesses,
       computerAccess: this.computerAccess.snapshot(this.state.computerAccess, this.activeWorkingDirectory(), this.pendingApprovals[0]),
       appVersion: this.appVersion,
     });
@@ -143,6 +148,7 @@ export class MainController {
       id: id(),
       title: "New session",
       provider: "codex",
+      harnessId: this.harnessRegistry.compatibilityId("codex"),
       model: CODEX_MODELS[0],
       reasoning: "medium",
       sandboxMode: "workspace-write",
@@ -154,6 +160,7 @@ export class MainController {
       selectedAgentIds: [],
       agentRuns: [],
       crewCommunications: [],
+      harnessAttempts: [],
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -183,6 +190,7 @@ export class MainController {
     if (nextPatch.provider && nextPatch.provider !== conversation.provider) {
       conversation.threadId = undefined;
       conversation.model = nextPatch.provider === "codex" ? CODEX_MODELS[0] : DEFAULT_OPENROUTER_MODEL;
+      conversation.harnessId = this.harnessRegistry.compatibilityId(nextPatch.provider);
     }
     if (
       (nextPatch.projectMode !== undefined && nextPatch.projectMode !== conversation.projectMode)
@@ -218,6 +226,8 @@ export class MainController {
     }
     const providerStatus = this.statuses.find((status) => status.id === conversation.provider);
     if (!providerStatus?.ready) throw new Error(providerStatus?.detail || `${conversation.provider} is not configured`);
+    const adapter = this.harnessRegistry.resolve(conversation);
+    this.harnessRegistry.requireCompatible(adapter.descriptor.id, this.requiredHarnessCapabilities(conversation));
 
     const now = Date.now();
     const message: ChatMessage = { id: id(), role: "user", content: text, createdAt: now, provider: conversation.provider };
@@ -232,12 +242,25 @@ export class MainController {
     conversation.updatedAt = now;
     const controller = new AbortController();
     const runId = id();
+    const harnessAttempt: HarnessAttempt = {
+      id: runId,
+      harnessId: adapter.descriptor.id,
+      adapterVersion: adapter.descriptor.version,
+      status: "running",
+      startedAt: now,
+    };
+    conversation.harnessId = adapter.descriptor.id;
+    conversation.harnessAttempts = [...(conversation.harnessAttempts ?? []), harnessAttempt].slice(-40);
     this.runs.set(conversationId, controller);
     this.runIds.set(conversationId, runId);
     await this.recordConversationEvent(conversation, "conversation.snapshot", { conversation: boundedConversationProjection(conversation) }, runId);
     await this.recordConversationEvent(conversation, "run.started", { promptMessageId: message.id }, runId);
     await this.commit();
-    void this.executeRun(conversationId, text, controller);
+    const task = this.executeRun(conversationId, text, controller);
+    this.runTasks.set(conversationId, task);
+    void task.finally(() => {
+      if (this.runTasks.get(conversationId) === task) this.runTasks.delete(conversationId);
+    });
   }
 
   async cancelRun(conversationId: string): Promise<void> {
@@ -256,6 +279,7 @@ export class MainController {
         : run
     ));
     conversation.updatedAt = Date.now();
+    this.finishHarnessAttempt(conversation, runId, "stopped");
     await this.recordConversationEvent(conversation, "run.stopped", { reason: "operator" }, runId);
     await this.commit();
   }
@@ -342,7 +366,8 @@ export class MainController {
   }
 
   async refreshProviderStatuses(publish = true): Promise<void> {
-    this.statuses = await providerStatuses(this.state.settings, this.homeDirectory);
+    this.harnesses = await this.harnessRegistry.snapshot(this.state.settings, this.homeDirectory);
+    this.statuses = this.harnessRegistry.providerStatuses(this.harnesses);
     if (publish) await this.commit();
   }
 
@@ -394,19 +419,18 @@ export class MainController {
     try {
       const agents = await this.agents.selected(conversation.selectedAgentIds, conversation.workingDirectory);
       this.runAgentIcons.set(conversationId, new Map(agents.flatMap((agent) => agent.icon ? [[agent.name.toLowerCase(), agent.icon] as const] : [])));
-      if (conversation.provider === "codex") {
-        await runCodex({ conversation, settings, agents, prompt, signal: controller.signal, computerAccess, executeTool, onEvent });
-      } else {
-        const credential = await resolveOpenRouterCredential(this.state.settings, this.homeDirectory);
-        if (!credential) throw new Error("OpenRouter credential is unavailable");
-        await runOpenRouter({ conversation, settings, agents, prompt, signal: controller.signal, computerAccess, executeTool, onEvent, apiKey: credential.apiKey });
-      }
+      await this.harnessRegistry.dispatch(
+        conversation,
+        { conversation, settings, agents, prompt, signal: controller.signal, computerAccess, executeTool, onEvent },
+        this.requiredHarnessCapabilities(conversation),
+      );
       const current = this.state.conversations.find((item) => item.id === conversationId);
       if (current && this.runs.get(conversationId) === controller) {
         current.status = "idle";
         current.lastRunOutcome = classifyRunOutcome(current, conversation.selectedAgentIds.length);
         current.error = undefined;
         current.updatedAt = Date.now();
+        this.finishHarnessAttempt(current, this.runIds.get(conversationId), "completed");
         await this.recordConversationEvent(current, "run.completed", { outcome: current.lastRunOutcome }, this.runIds.get(conversationId));
         await this.commit();
       }
@@ -417,6 +441,7 @@ export class MainController {
         current.lastRunOutcome = controller.signal.aborted ? "stopped" : "failed";
         current.error = controller.signal.aborted ? "Run stopped" : error instanceof Error ? error.message : "Provider run failed";
         current.updatedAt = Date.now();
+        this.finishHarnessAttempt(current, this.runIds.get(conversationId), controller.signal.aborted ? "stopped" : "failed");
         await this.recordConversationEvent(
           current,
           controller.signal.aborted ? "run.stopped" : "run.failed",
@@ -437,7 +462,15 @@ export class MainController {
     if (!conversation) return;
     let eventType: ControlPlaneEventType;
     let eventPayload: unknown;
-    if (event.type === "thread") conversation.threadId = event.threadId;
+    if (event.type === "thread") {
+      conversation.threadId = event.threadId;
+      const attempt = this.currentHarnessAttempt(conversation, this.runIds.get(conversationId));
+      if (attempt) attempt.session = {
+        harnessId: attempt.harnessId,
+        adapterVersion: attempt.adapterVersion,
+        nativeSessionId: event.threadId,
+      };
+    }
     if (event.type === "usage") conversation.usage = event.usage;
     if (event.type === "final") {
       const message: ChatMessage = {
@@ -671,6 +704,31 @@ export class MainController {
 
   private recordAuditEvent(conversation: Conversation, audit: ComputerAuditEntry): Promise<void> {
     return this.recordConversationEvent(conversation, "audit.recorded", { audit }, this.runIds.get(conversation.id));
+  }
+
+  private requiredHarnessCapabilities(conversation: Conversation): RequiredHarnessCapabilities {
+    return {
+      streaming: true,
+      cancellation: true,
+      tools: true,
+      ...(conversation.selectedAgentIds.length ? { multiAgent: true } : {}),
+    };
+  }
+
+  private currentHarnessAttempt(conversation: Conversation, attemptId?: string): HarnessAttempt | undefined {
+    if (!attemptId) return undefined;
+    return conversation.harnessAttempts?.findLast((attempt) => attempt.id === attemptId);
+  }
+
+  private finishHarnessAttempt(
+    conversation: Conversation,
+    attemptId: string | undefined,
+    status: Exclude<HarnessAttempt["status"], "running">,
+  ): void {
+    const attempt = this.currentHarnessAttempt(conversation, attemptId);
+    if (!attempt || attempt.status !== "running") return;
+    attempt.status = status;
+    attempt.endedAt = Date.now();
   }
 
   private async commit(): Promise<void> {

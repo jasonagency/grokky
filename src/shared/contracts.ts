@@ -1,4 +1,5 @@
 import type { ProjectionChange } from "./control-plane-contracts";
+import type { HarnessAttempt, HarnessRegistryEntry } from "./harness-contracts";
 
 export type ProviderId = "codex" | "openrouter";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
@@ -116,6 +117,7 @@ export interface Conversation {
   id: string;
   title: string;
   provider: ProviderId;
+  harnessId?: string;
   model: string;
   reasoning: ReasoningEffort;
   sandboxMode: SandboxMode;
@@ -128,6 +130,7 @@ export interface Conversation {
   selectedAgentIds: string[];
   agentRuns: AgentRun[];
   crewCommunications: CrewCommunication[];
+  harnessAttempts?: HarnessAttempt[];
   usage?: UsageSummary;
   status: RunStatus;
   lastRunOutcome?: RunOutcome;
@@ -249,6 +252,7 @@ export interface AppSnapshot {
   activeConversationId?: string;
   settings: AppSettings;
   providerStatuses: ProviderStatus[];
+  harnesses: HarnessRegistryEntry[];
   computerAccess: ComputerAccessSnapshot;
   appVersion: string;
 }
