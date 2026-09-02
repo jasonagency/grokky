@@ -1443,7 +1443,15 @@ export class MainController {
     if (event.type === "activity") return { activity: event.activity };
     if (event.type === "orchestration") return { event: event.event };
     if (event.type === "usage") return { usage: event.usage };
-    return { message: { id: id(), role: "assistant", content: event.text, createdAt: Date.now() } };
+    return {
+      message: {
+        id: id(),
+        role: "assistant",
+        content: event.text,
+        createdAt: Date.now(),
+        ...(event.runtime ? { provider: event.runtime.provider, runtime: event.runtime } : {}),
+      },
+    };
   }
 
   private async recordTaskEvent(claim: TaskLeaseClaim, type: ControlPlaneEventType, payload: unknown): Promise<void> {
@@ -1545,6 +1553,12 @@ export class MainController {
         content: event.text,
         createdAt: Date.now(),
         provider: conversation.provider,
+        runtime: event.runtime ?? {
+          provider: conversation.provider,
+          harnessId: conversation.harnessId ?? "unknown",
+          requestedModel: conversation.model,
+          reasoning: conversation.reasoning,
+        },
       };
       conversation.messages.push(message);
       eventType = "run.final";
@@ -1598,6 +1612,7 @@ export class MainController {
               ...(icon ? { icon } : {}),
               ...(event.event.prompt && event.event.tool !== "wait" ? { task: event.event.prompt } : {}),
               ...(thread.message ? { result: thread.message } : {}),
+              ...(thread.runtime ? { runtime: thread.runtime } : {}),
               updatedAt: now,
             };
           } else {
@@ -1610,6 +1625,7 @@ export class MainController {
               task: event.event.prompt || "Delegated task",
               status,
               ...(thread.message ? { result: thread.message } : {}),
+              ...(thread.runtime ? { runtime: thread.runtime } : {}),
               createdAt: now,
               updatedAt: now,
             });

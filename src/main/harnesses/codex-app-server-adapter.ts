@@ -214,7 +214,13 @@ export class CodexAppServerAdapter implements HarnessAdapter {
       if (context.signal.aborted) throw new Error("Codex turn was cancelled before start");
       const response = await client.request("turn/start", {
         threadId: sessionId,
-        input: textInput(crewPrompt(context.prompt, context.agents, context.settings.webSearchEnabled, context.conversation.allowCommands)),
+        input: textInput(crewPrompt(
+          context.prompt,
+          context.agents,
+          context.settings.webSearchEnabled,
+          context.conversation.allowCommands,
+          { harnessId: context.conversation.harnessId ?? this.descriptor.id, requestedModel: context.conversation.model },
+        )),
         cwd: context.conversation.workingDirectory,
         runtimeWorkspaceRoots: [context.conversation.workingDirectory],
         approvalPolicy: "on-request",

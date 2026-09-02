@@ -40,6 +40,21 @@ export function validateHarnessEvent(value: unknown): ProviderEvent {
     if (typeof value.threadId !== "string" || !value.threadId || value.threadId.length > 500) throw new Error("Invalid harness thread event");
   } else if (value.type === "final") {
     if (typeof value.text !== "string") throw new Error("Invalid harness final event");
+    if (value.runtime !== undefined) {
+      const runtime = value.runtime;
+      if (
+        !isObject(runtime)
+        || !["codex", "openrouter", "pi"].includes(String(runtime.provider))
+        || typeof runtime.harnessId !== "string"
+        || !runtime.harnessId
+        || runtime.harnessId.length > 160
+        || typeof runtime.requestedModel !== "string"
+        || !runtime.requestedModel
+        || runtime.requestedModel.length > 160
+        || (runtime.resolvedModel !== undefined && (typeof runtime.resolvedModel !== "string" || runtime.resolvedModel.length > 160))
+        || !["low", "medium", "high", "xhigh"].includes(String(runtime.reasoning))
+      ) throw new Error("Invalid harness runtime receipt");
+    }
   } else if (value.type === "activity") {
     if (!isObject(value.activity) || typeof value.activity.id !== "string" || typeof value.activity.label !== "string") throw new Error("Invalid harness activity event");
   } else if (value.type === "orchestration") {

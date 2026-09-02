@@ -24,4 +24,9 @@ describe("OpenRouter screen tool content", () => {
   test("keeps ordinary tool output textual", async () => {
     await expect(openRouterToolContent("read_file", "hello")).resolves.toBe("hello");
   });
+
+  test("bounds textual tool output retained in the model transcript", async () => {
+    const content = await openRouterToolContent("read_file", "x".repeat(9_000));
+    expect(content).toHaveLength(8_000);
+  });
 });

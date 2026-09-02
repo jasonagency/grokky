@@ -173,14 +173,23 @@ export function codexCrewMode(prompt: string, agents: AgentDefinition[]): CodexC
   return hasWorker && hasTester && implementationRequest.test(prompt) ? "staged" : "parallel";
 }
 
-export function crewPrompt(prompt: string, agents: AgentDefinition[], webSearchEnabled: boolean, commandsAllowed: boolean): string {
+export function crewPrompt(
+  prompt: string,
+  agents: AgentDefinition[],
+  webSearchEnabled: boolean,
+  commandsAllowed: boolean,
+  runtime?: { harnessId: string; requestedModel: string },
+): string {
+  const runtimeRule = runtime
+    ? `Runtime configuration supplied by PuckBot: provider=codex, harness=${runtime.harnessId}, requested_model=${runtime.requestedModel}. If asked what model you are using, report this as the requested model shown in the run receipt.`
+    : "";
   const webRule = webSearchEnabled
     ? "Live web search is enabled. When the user asks for current or online information, actually use the web search tool and cite the sources you consulted."
     : "Live web search is disabled for this PuckBot session. Do not claim that you can browse or search the live web; explain that it can be enabled in Settings.";
   const computerRule = commandsAllowed
     ? "The user has enabled local development commands for this session. Stay within the selected workspace and the SDK sandbox."
     : "Local development commands are not enabled for this session. You may use shell commands only for read-only inspection inside the selected workspace, such as pwd, ls, rg, sed, cat, file, and git status, diff, or log. Do not install packages, run package scripts, builds, tests, servers, or mutate files through the shell. File edits are allowed only when the SDK workspace sandbox permits them.";
-  if (!agents.length) return `${webRule}\n${computerRule}\n${PRODUCT_WRITING_STYLE_RULE}\n\nUser request:\n${prompt}`;
+  if (!agents.length) return `${runtimeRule ? `${runtimeRule}\n` : ""}${webRule}\n${computerRule}\n${PRODUCT_WRITING_STYLE_RULE}\n\nUser request:\n${prompt}`;
   const roster = agents.map((agent) => `- agent_type=${agent.name}: ${agent.description}`).join("\n");
   const mode = codexCrewMode(prompt, agents);
   const orchestrationRule = mode === "staged"
@@ -198,6 +207,7 @@ export function crewPrompt(prompt: string, agents: AgentDefinition[], webSearchE
         "Call spawn_agent exactly once for every selected agent_type above before waiting. Give each a distinct bounded task and spawn all roles before the first wait.",
       ].join("\n");
   return [
+    runtimeRule,
     webRule,
     computerRule,
     PRODUCT_WRITING_STYLE_RULE,
@@ -341,7 +351,13 @@ export async function runCodex(context: ProviderRunContext): Promise<void> {
   const thread = conversation.threadId
     ? codex.resumeThread(conversation.threadId, options)
     : codex.startThread(options);
-  const { events } = await thread.runStreamed(crewPrompt(context.prompt, context.agents, settings.webSearchEnabled, commandsAllowed), { signal: context.signal });
+  const { events } = await thread.runStreamed(crewPrompt(
+    context.prompt,
+    context.agents,
+    settings.webSearchEnabled,
+    commandsAllowed,
+    { harnessId: conversation.harnessId ?? "codex-sdk", requestedModel: conversation.model },
+  ), { signal: context.signal });
   const eventState: CodexEventState = {
     agentNameByThread: new Map(),
     unusedAgentNames: context.agents.map((agent) => agent.name),

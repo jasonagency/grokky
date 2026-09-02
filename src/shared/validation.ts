@@ -182,6 +182,15 @@ export function validateAgentDraft(value: unknown): AgentDraft {
   if (typeof input.developerInstructions !== "string" || input.developerInstructions.length > 30_000) throw new Error("Invalid agent instructions");
   if (input.scope !== "personal" && input.scope !== "project") throw new Error("Invalid agent scope");
   if (input.model !== undefined && (typeof input.model !== "string" || (input.model && !/^[a-zA-Z0-9_~./:-]{2,160}$/.test(input.model)))) throw new Error("Invalid agent model");
+  const providerModels: AgentDraft["providerModels"] = {};
+  if (input.providerModels !== undefined) {
+    if (!input.providerModels || typeof input.providerModels !== "object" || Array.isArray(input.providerModels)) throw new Error("Invalid agent provider models");
+    for (const [provider, model] of Object.entries(input.providerModels)) {
+      if (provider !== "openrouter") throw new Error("Invalid agent model provider");
+      if (typeof model !== "string" || !/^[a-zA-Z0-9_~./:-]{2,160}$/.test(model)) throw new Error("Invalid agent provider model");
+      providerModels[provider] = model;
+    }
+  }
   if (input.reasoning !== undefined && !reasoning.has(input.reasoning as ReasoningEffort)) throw new Error("Invalid agent reasoning");
   if (input.sandboxMode !== undefined && !sandboxModes.has(input.sandboxMode as SandboxMode)) throw new Error("Invalid agent permission");
   const agentIcons = new Set(["lime", "cyan", "coral", "violet", "amber", "mint"]);
@@ -193,6 +202,7 @@ export function validateAgentDraft(value: unknown): AgentDraft {
     scope: input.scope,
     ...(input.icon ? { icon: input.icon as AgentDraft["icon"] } : {}),
     ...(input.model ? { model: input.model as string } : {}),
+    ...(Object.keys(providerModels).length ? { providerModels } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning as ReasoningEffort } : {}),
     ...(input.sandboxMode ? { sandboxMode: input.sandboxMode as SandboxMode } : {}),
   };

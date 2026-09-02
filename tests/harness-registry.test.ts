@@ -3,7 +3,11 @@ import { HarnessRegistry } from "../src/main/harnesses/registry";
 import type { HarnessAdapter } from "../src/main/harnesses/types";
 import type { Conversation } from "../src/shared/contracts";
 
-function adapter(id: string, capabilities: Partial<HarnessAdapter["descriptor"]["capabilities"]> = {}): HarnessAdapter {
+function adapter(
+  id: string,
+  capabilities: Partial<HarnessAdapter["descriptor"]["capabilities"]> = {},
+  run: HarnessAdapter["run"] = async () => undefined,
+): HarnessAdapter {
   return {
     descriptor: {
       id,
@@ -25,7 +29,7 @@ function adapter(id: string, capabilities: Partial<HarnessAdapter["descriptor"][
       },
     },
     health: async () => ({ ready: true, label: "Ready", source: "test", detail: "Ready" }),
-    run: async () => undefined,
+    run,
     deliverControl: async () => ({ accepted: false, reason: "unsupported" }),
     cleanup: async () => undefined,
   };
@@ -69,5 +73,36 @@ describe("harness registry", () => {
     const registry = new HarnessRegistry([adapter("openrouter-chat")]);
     expect(() => registry.requireCompatible("openrouter-chat", { mcp: true, computerControl: true }))
       .toThrow("openrouter-chat is incompatible: MCP, computer control");
+  });
+
+  test("enriches final events with requested runtime metadata", async () => {
+    const events: unknown[] = [];
+    const current = conversation("codex", "codex-sdk");
+    const registry = new HarnessRegistry([adapter("codex-sdk", {}, async (context) => {
+      await context.onEvent({ type: "final", text: "Done" });
+    })]);
+
+    await registry.dispatch(current, {
+      conversation: current,
+      settings: {} as never,
+      agents: [],
+      prompt: "Reply",
+      signal: new AbortController().signal,
+      selectedSkillPaths: [],
+      computerAccess: {} as never,
+      executeTool: async () => "",
+      controlTask: async () => undefined,
+      onEvent: async (event) => { events.push(event); },
+    });
+
+    expect(events).toEqual([expect.objectContaining({
+      type: "final",
+      runtime: {
+        provider: "codex",
+        harnessId: "codex-sdk",
+        requestedModel: "test/model",
+        reasoning: "medium",
+      },
+    })]);
   });
 });

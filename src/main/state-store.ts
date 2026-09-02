@@ -8,6 +8,7 @@ import type {
   ComputerCapabilityId,
   Conversation,
   CrewCommunication,
+  RunRuntimeReceipt,
 } from "../shared/contracts";
 import type { HarnessAttempt } from "../shared/harness-contracts";
 import { DirectDatabaseClient } from "./storage/database-client";
@@ -165,6 +166,19 @@ function normalizeComputerAccess(value: unknown): PersistedComputerAccess {
   };
 }
 
+function normalizeRuntimeReceipt(value: unknown): RunRuntimeReceipt | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Partial<RunRuntimeReceipt>;
+  if (
+    !["codex", "openrouter", "pi"].includes(item.provider ?? "")
+    || typeof item.harnessId !== "string"
+    || typeof item.requestedModel !== "string"
+    || !["low", "medium", "high", "xhigh"].includes(item.reasoning ?? "")
+    || (item.resolvedModel !== undefined && typeof item.resolvedModel !== "string")
+  ) return undefined;
+  return item as RunRuntimeReceipt;
+}
+
 function normalizeAgentRun(value: unknown): AgentRun | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Partial<AgentRun>;
@@ -172,6 +186,7 @@ function normalizeAgentRun(value: unknown): AgentRun | null {
   const now = Date.now();
   const allowed = new Set<AgentRun["status"]>(["starting", "working", "waiting", "completed", "failed", "stopped"]);
   const storedStatus = allowed.has(item.status as AgentRun["status"]) ? item.status as AgentRun["status"] : "stopped";
+  const runtime = normalizeRuntimeReceipt(item.runtime);
   return {
     id: item.id,
     operationId: typeof item.operationId === "string" ? item.operationId : item.id,
@@ -180,6 +195,7 @@ function normalizeAgentRun(value: unknown): AgentRun | null {
     task: item.task,
     status: new Set<AgentRun["status"]>(["starting", "working", "waiting"]).has(storedStatus) ? "stopped" : storedStatus,
     ...(typeof item.result === "string" ? { result: item.result } : {}),
+    ...(runtime ? { runtime } : {}),
     createdAt: typeof item.createdAt === "number" ? item.createdAt : now,
     updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : now,
   };

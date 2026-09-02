@@ -1,4 +1,4 @@
-import type { ActivityItem, AgentDefinition, AppSettings, Conversation, McpToolClassification, OrchestrationEvent, UsageSummary } from "../../shared/contracts";
+import type { ActivityItem, AgentDefinition, AppSettings, Conversation, McpToolClassification, OrchestrationEvent, RunRuntimeReceipt, UsageSummary } from "../../shared/contracts";
 import type { ComputerToolName } from "../computer-access";
 import type { TaskControlRequest } from "../../shared/control-plane-contracts";
 import type { PersistedComputerAccess } from "../state-store";
@@ -7,7 +7,7 @@ export type ProviderEvent =
   | { type: "thread"; threadId: string }
   | { type: "activity"; activity: ActivityItem }
   | { type: "orchestration"; event: OrchestrationEvent }
-  | { type: "final"; text: string }
+  | { type: "final"; text: string; runtime?: RunRuntimeReceipt }
   | { type: "usage"; usage: UsageSummary };
 
 export interface ProviderRunContext {

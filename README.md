@@ -88,7 +88,7 @@ PuckBot keeps them visible and independently configurable. A conversation record
 | --- | --- |
 | Conversations | Create, search, switch, cancel, and delete local chats with a confirmation step |
 | Providers | Switch between Codex App Server, OpenRouter, and the native Pi SDK per conversation |
-| Models | Select Codex models, enter OpenRouter or Pi provider/model IDs, and set reasoning effort |
+| Models | Select a conversation model, set Codex and OpenRouter crew overrides independently, and see requested and provider-resolved runtime receipts |
 | Projects | Search recent folders, choose or create a project from the composer, or use an isolated no-project scratch folder |
 | Access | Switch each conversation between Read only, Workspace access, and Full access for local development commands |
 | Live activity | Render reasoning, plans, files, commands, tools, errors, and usage as normalized events |
@@ -400,14 +400,14 @@ flowchart TB
   OF --> UI
 ```
 
-For Codex, PuckBot enables the SDK's multi-agent features and translates confirmed collaboration evidence into named specialist cards plus an inspectable Messages tab. Legacy runtimes expose that evidence as SDK collaboration items. Sol's v2 protocol currently omits child starts and reports from the public stream, so PuckBot tails only the active root thread's local Codex JSONL record and maps `SubAgentActivity` starts plus plaintext child `FINAL_ANSWER` payloads. It ignores encrypted intermediate content. The Messages tab shows confirmed assignments, direct messages, specialist reports, sender and receiver routing, timestamps, and exceptional delivery states in chronological speaker groups without exposing raw orchestration tool names. For OpenRouter, every specialist gets its own prompt, optional model, optional reasoning level, developer instructions, and read-only tool catalog. All specialists run concurrently. One lead runs only after they finish, owns any allowed writes, and produces the user-facing result.
+For Codex, PuckBot enables the SDK's multi-agent features and translates confirmed collaboration evidence into named specialist cards plus an inspectable Messages tab. Legacy runtimes expose that evidence as SDK collaboration items. Sol's v2 protocol currently omits child starts and reports from the public stream, so PuckBot tails only the active root thread's local Codex JSONL record and maps `SubAgentActivity` starts plus plaintext child `FINAL_ANSWER` payloads. It ignores encrypted intermediate content. The Messages tab shows confirmed assignments, direct messages, specialist reports, sender and receiver routing, timestamps, and exceptional delivery states in chronological speaker groups without exposing raw orchestration tool names. For OpenRouter, every specialist gets its own prompt, optional OpenRouter model override, optional reasoning level, developer instructions, and read-only tool catalog. Without an override, the specialist inherits the conversation model selected in the top bar. Codex agent models apply only to Codex crews. All specialists run concurrently. One lead runs only after they finish, owns any allowed writes, and produces the user-facing result.
 
 Agent definitions live in normal Codex TOML locations:
 
 - Personal: `$HOME/.codex/agents/*.toml`
 - Project: `<workspace>/.codex/agents/*.toml`
 
-PuckBot adds a comment-only `grokky_icon` metadata field so the interface can assign a different mascot color without changing the agent contract.
+PuckBot adds comment-only `grokky_icon` and `puckbot_openrouter_model` metadata fields so the interface can assign a mascot color and an OpenRouter-specific model without changing the Codex agent contract.
 
 ## Skills, MCP servers, and connectors
 

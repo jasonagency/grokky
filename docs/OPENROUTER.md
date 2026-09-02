@@ -75,6 +75,8 @@ A lead run receives:
 
 The base system contract states the selected workspace, read/write state, command state, live-web state, evidence rules, secret rules, and product writing style.
 
+It also states the requested provider, harness, and model. The final message stores both the requested model and the provider-resolved model when OpenRouter returns one. The interface presents these values as a runtime receipt instead of asking the model to identify itself from memory.
+
 Specialists do not receive chat history. Each gets one bounded task plus its agent description and developer instructions. This isolates their analysis and reduces agreement-by-copying.
 
 ## Dynamic tool catalog
@@ -158,9 +160,11 @@ The implementation uses:
 - `toolChoice: "auto"`
 - `parallelToolCalls: false`
 - A maximum of eight model rounds
+- One final no-tools summary request when all eight rounds use tools
 - A 180-second SDK timeout
 - Sequential tool execution in response order
 - Model-visible `Tool error:` results when a bounded action fails
+- Model-visible text tool results capped at 8,000 characters per call
 
 Sequential tool calls prevent two model-requested writes from racing against the same file. Crew members themselves can still run in parallel because they are read-only.
 
@@ -198,7 +202,7 @@ PuckBot uses OpenRouter's current server tool type, not the deprecated plugin-st
 The research stage runs only when:
 
 - Web search is enabled in settings, and
-- The prompt contains an online or current-information intent such as search, browse, latest, current, news, sources, URL, or website.
+- The prompt contains an explicit online or current-information intent such as search, browse, look up, latest news, current price, recent updates, a direct URL, or a request for sources. A bare mention of a website does not trigger research.
 
 ### Audit requirements
 
@@ -241,7 +245,7 @@ For each agent, PuckBot:
 
 1. Generates a synthetic OpenRouter thread ID for UI correlation.
 2. Emits a real `spawn_agent` orchestration event.
-3. Applies the agent's optional model and reasoning overrides.
+3. Applies the agent's optional OpenRouter model and reasoning overrides. Without an OpenRouter override, the specialist inherits the conversation model. A Codex model override never crosses into this provider.
 4. Forces read-only workspace mode and disables commands.
 5. Runs the tool loop independently.
 6. Emits a `wait` event containing the completed finding or failure.

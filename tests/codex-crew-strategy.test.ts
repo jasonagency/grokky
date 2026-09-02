@@ -13,7 +13,8 @@ describe("Codex crew strategy", () => {
     const prompt = "Build a beautiful website and verify it locally";
     expect(codexCrewMode(prompt, agents)).toBe("staged");
 
-    const instructions = crewPrompt(prompt, agents, false, true);
+    const instructions = crewPrompt(prompt, agents, false, true, { harnessId: "codex-sdk", requestedModel: "gpt-5.6-sol" });
+    expect(instructions).toContain("provider=codex, harness=codex-sdk, requested_model=gpt-5.6-sol");
     expect(instructions).toContain("Execution mode: staged implementation pipeline");
     expect(instructions).toContain("IMPLEMENTATION_READY");
     expect(instructions).toContain("Spawn the tester immediately on that handoff while the worker finishes its short smoke checks");

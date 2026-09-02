@@ -38,16 +38,18 @@ describe("AgentService", () => {
       scope: "project",
       icon: "violet",
       model: "gpt-5.6-terra",
+      providerModels: { openrouter: "anthropic/claude-sonnet-4.6" },
       reasoning: "high",
       sandboxMode: "read-only",
     }, project);
     const created = agents.find((agent) => agent.name === "qa_scout");
-    expect(created).toMatchObject({ scope: "project", icon: "violet", model: "gpt-5.6-terra", reasoning: "high", sandboxMode: "read-only" });
+    expect(created).toMatchObject({ scope: "project", icon: "violet", model: "gpt-5.6-terra", providerModels: { openrouter: "anthropic/claude-sonnet-4.6" }, reasoning: "high", sandboxMode: "read-only" });
     expect(created?.path).toBe(join(project, ".codex", "agents", "qa_scout.toml"));
 
     const source = await readFile(created!.path!, "utf8");
     expect(source).toContain('name = "qa_scout"');
     expect(source).toContain('# grokky_icon = "violet"');
+    expect(source).toContain('# puckbot_openrouter_model = "anthropic/claude-sonnet-4.6"');
     expect(source).toContain('description = "Finds risky behavior and missing tests."');
     expect(source).toContain('developer_instructions = "Inspect evidence in read-only mode and report exact reproduction steps."');
 

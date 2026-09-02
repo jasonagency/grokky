@@ -125,12 +125,16 @@ export function ModelCombobox({
   suggestions,
   label,
   disabled,
+  allowEmpty = false,
+  placeholder,
   onCommit,
 }: {
   value: string;
   suggestions: string[];
   label: string;
   disabled?: boolean;
+  allowEmpty?: boolean;
+  placeholder?: string;
   onCommit(value: string): void;
 }) {
   const [draft, setDraft] = useState(value);
@@ -159,7 +163,7 @@ export function ModelCombobox({
 
   const commit = (nextValue = draft) => {
     const next = nextValue.trim();
-    if (next && next !== value) onCommit(next);
+    if ((next || allowEmpty) && next !== value) onCommit(next);
     else setDraft(value);
     setOpen(false);
   };
@@ -169,6 +173,7 @@ export function ModelCombobox({
       <input
         ref={inputRef}
         value={draft}
+        placeholder={placeholder}
         disabled={disabled}
         aria-label={label}
         aria-autocomplete="list"
