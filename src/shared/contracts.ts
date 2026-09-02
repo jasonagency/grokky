@@ -26,12 +26,21 @@ export interface UsageSummary {
   costUsd?: number;
 }
 
+export interface RunRuntimeReceipt {
+  provider: ProviderId;
+  harnessId: string;
+  requestedModel: string;
+  resolvedModel?: string;
+  reasoning: ReasoningEffort;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   createdAt: number;
   provider: ProviderId;
+  runtime?: RunRuntimeReceipt;
 }
 
 export interface ActivityItem {
@@ -52,6 +61,7 @@ export interface AgentDefinition {
   builtIn: boolean;
   icon?: AgentIcon;
   model?: string;
+  providerModels?: { openrouter?: string };
   reasoning?: ReasoningEffort;
   sandboxMode?: SandboxMode;
   path?: string;
@@ -64,6 +74,7 @@ export interface AgentDraft {
   scope: Exclude<AgentScope, "built-in">;
   icon?: AgentIcon;
   model?: string;
+  providerModels?: { openrouter?: string };
   reasoning?: ReasoningEffort;
   sandboxMode?: SandboxMode;
 }
@@ -143,6 +154,7 @@ export interface AgentRun {
   status: AgentRunStatus;
   icon?: AgentIcon;
   result?: string;
+  runtime?: RunRuntimeReceipt;
   createdAt: number;
   updatedAt: number;
 }
@@ -152,6 +164,7 @@ export interface OrchestrationThreadState {
   name?: string;
   status: string;
   message?: string;
+  runtime?: RunRuntimeReceipt;
 }
 
 export interface OrchestrationEvent {

@@ -177,7 +177,7 @@ function toolsFor(context: OpenRouterRunContext, conversation: Conversation, rea
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters as never,
-        strict: true,
+        strict: false,
       },
     }));
   return [
@@ -201,9 +201,9 @@ function visibleContent(content: unknown): string {
 }
 
 export async function openRouterToolContent(name: string, output: string): Promise<ChatToolMessage["content"]> {
-  if (name !== "capture_screen") return output.slice(0, 40_000);
+  if (name !== "capture_screen") return output.slice(0, 8_000);
   const pathname = output.match(/^Captured the current display to (.+)$/)?.[1];
-  if (!pathname) return output.slice(0, 40_000);
+  if (!pathname) return output.slice(0, 8_000);
   try {
     const capture = await readFile(pathname);
     if (capture.length > 10_000_000) return `${output}\nThe capture exceeded the 10 MB model attachment limit.`;
@@ -250,9 +250,10 @@ function activityForCall(call: ChatToolCall, status: ActivityItem["status"], det
   };
 }
 
-function baseSystem(conversation: Conversation, readOnly: boolean, webSearchEnabled: boolean): string[] {
+function baseSystem(conversation: Conversation, readOnly: boolean, webSearchEnabled: boolean, requestedModel: string): string[] {
   return [
     "You are PuckBot, a careful local workspace agent.",
+    `Runtime configuration supplied by PuckBot: provider=openrouter, harness=${conversation.harnessId ?? "openrouter-chat"}, requested_model=${requestedModel}. If asked what model you are using, report this requested model and explain that the run receipt records the upstream-resolved model when OpenRouter returns one.`,
     `The selected workspace is ${conversation.workingDirectory}.`,
     "Use tools when repository evidence is needed. Never request, read, expose, or infer credentials or private keys.",
     "Only claim to have read, browsed, seen, clicked, typed, or opened something when the matching tool completed successfully.",
@@ -267,7 +268,8 @@ function baseSystem(conversation: Conversation, readOnly: boolean, webSearchEnab
 }
 
 function needsWebResearch(prompt: string): boolean {
-  return /\b(search|browse|look\s*up|web|internet|online|latest|current|today|news|recent|source|sources|url|website)\b/i.test(prompt);
+  return /https?:\/\//i.test(prompt)
+    || /\b(search|browse|look\s*up|research\s+online|search\s+online|on\s+the\s+web|internet|latest\s+(?:news|version|release|price|status)|today'?s\s+(?:news|price|status)|current\s+(?:news|version|release|price|status|information|weather|schedule)|recent\s+(?:news|releases?|changes?|updates?|events?)|(?:cite|find|provide|include)\s+(?:reliable\s+)?sources?)\b/i.test(prompt);
 }
 
 interface WebSearchCitation {
@@ -431,30 +433,38 @@ interface LoopOptions {
   emitActivity?: boolean;
 }
 
+interface LoopResult {
+  text: string;
+  usage?: UsageSummary;
+  requestedModel: string;
+  resolvedModel: string;
+}
+
 async function runLoop(
   context: OpenRouterRunContext,
   client: OpenRouter,
   options: LoopOptions,
-): Promise<{ text: string; usage?: UsageSummary }> {
+): Promise<LoopResult> {
   const readOnly = options.readOnly === true;
   const tools = toolsFor(context, options.conversation, readOnly);
+  const requestedModel = options.model || options.conversation.model;
   const prior = options.history
     ? options.conversation.messages.slice(-41, -1).map((message) => ({ role: message.role, content: message.content }) as ChatMessages)
     : [];
   const messages: ChatMessages[] = [
-    { role: "system", content: [...baseSystem(options.conversation, readOnly, context.settings.webSearchEnabled), ...(options.systemExtra ?? [])].join("\n") },
+    { role: "system", content: [...baseSystem(options.conversation, readOnly, context.settings.webSearchEnabled, requestedModel), ...(options.systemExtra ?? [])].join("\n") },
     ...prior,
     { role: "user", content: options.prompt },
   ];
   let totalUsage: UsageSummary | undefined;
-  for (let step = 0; step < 8; step += 1) {
+  const complete = async (requestTools: typeof tools, toolChoice: "auto" | "none"): Promise<ChatResult> => {
     if (context.signal.aborted) throw new Error("OpenRouter run cancelled");
     const response = await client.chat.send({
       chatRequest: {
-        model: options.model || options.conversation.model,
+        model: requestedModel,
         messages,
-        tools,
-        toolChoice: "auto",
+        tools: requestTools,
+        toolChoice,
         parallelToolCalls: false,
         reasoning: { effort: options.reasoning || options.conversation.reasoning },
         stream: false,
@@ -467,6 +477,10 @@ async function runLoop(
     });
     const result = response as ChatResult;
     totalUsage = addUsage(totalUsage, usageFrom(result));
+    return result;
+  };
+  for (let step = 0; step < 8; step += 1) {
+    const result = await complete(tools, "auto");
     const choice = result.choices[0];
     if (!choice) throw new Error("OpenRouter returned no completion choice");
     const assistant = choice.message;
@@ -474,7 +488,7 @@ async function runLoop(
     if (!toolCalls.length) {
       const text = visibleContent(assistant.content).trim();
       if (!text) throw new Error("OpenRouter returned an empty answer");
-      return { text, ...(totalUsage ? { usage: totalUsage } : {}) };
+      return { text, ...(totalUsage ? { usage: totalUsage } : {}), requestedModel, resolvedModel: result.model || requestedModel };
     }
     messages.push({ role: "assistant", content: assistant.content ?? "", toolCalls });
     for (const call of toolCalls) {
@@ -499,7 +513,14 @@ async function runLoop(
       messages.push({ role: "tool", toolCallId: call.id, content: await openRouterToolContent(call.function.name, toolOutput) });
     }
   }
-  throw new Error("OpenRouter reached the eight-step tool limit without a final answer");
+  messages.push({
+    role: "system",
+    content: "The tool budget is exhausted. Do not call more tools. Return a concise final response now that states what was completed, what changed, any failures encountered, and what remains unfinished.",
+  });
+  const result = await complete([], "none");
+  const text = visibleContent(result.choices[0]?.message.content).trim();
+  if (!text) throw new Error("OpenRouter exhausted the tool budget and returned no final summary");
+  return { text, ...(totalUsage ? { usage: totalUsage } : {}), requestedModel, resolvedModel: result.model || requestedModel };
 }
 
 async function runCrewMember(
@@ -526,7 +547,7 @@ async function runCrewMember(
     const result = await runLoop(context, client, {
       conversation: { ...context.conversation, sandboxMode: "read-only", allowCommands: false },
       prompt,
-      model: agent.model,
+      model: agent.providerModels?.openrouter,
       reasoning: agent.reasoning,
       systemExtra: [
         `You are the ${agent.name} crew member.`,
@@ -544,11 +565,27 @@ async function runCrewMember(
         tool: "wait",
         senderThreadId: context.conversation.id,
         senderName: "PuckBot lead",
-        receiverThreads: [{ threadId, name: agent.name, status: "completed", message: result.text }],
+        receiverThreads: [{
+          threadId,
+          name: agent.name,
+          status: "completed",
+          message: result.text,
+          runtime: {
+            provider: "openrouter",
+            harnessId: context.conversation.harnessId ?? "openrouter-chat",
+            requestedModel: result.requestedModel,
+            resolvedModel: result.resolvedModel,
+            reasoning: agent.reasoning ?? context.conversation.reasoning,
+          },
+        }],
         status: "completed",
       },
     });
-    return { agent, ...result };
+    return {
+      agent,
+      text: result.text,
+      ...(result.usage ? { usage: result.usage } : {}),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Crew member failed";
     await context.onEvent({
@@ -603,7 +640,6 @@ export async function runOpenRouter(context: OpenRouterRunContext): Promise<void
   const final = await runLoop(context, client, {
     conversation: context.conversation,
     prompt: findings ? `${prompt}\n\n${findings}` : prompt,
-    model: webResearch ? OPENROUTER_WEB_RESEARCH_MODEL : undefined,
     history: true,
     systemExtra: [
       ...(results.length ? ["You are the lead agent. Consolidate the crew's findings before acting or answering."] : []),
@@ -611,6 +647,16 @@ export async function runOpenRouter(context: OpenRouterRunContext): Promise<void
     ],
   });
   totalUsage = addUsage(totalUsage, final.usage);
-  await context.onEvent({ type: "final", text: final.text });
+  await context.onEvent({
+    type: "final",
+    text: final.text,
+    runtime: {
+      provider: "openrouter",
+      harnessId: context.conversation.harnessId ?? "openrouter-chat",
+      requestedModel: final.requestedModel,
+      resolvedModel: final.resolvedModel,
+      reasoning: context.conversation.reasoning,
+    },
+  });
   if (totalUsage) await context.onEvent({ type: "usage", usage: totalUsage });
 }

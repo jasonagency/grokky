@@ -61,6 +61,8 @@ describe("Codex App Server adapter", () => {
       const events: ProviderEvent[] = [];
       await new CodexAppServerAdapter(async () => client, fallback).run(context(events, existing));
       expect(client.requests[0]?.method).toBe(existing ? "thread/resume" : "thread/start");
+      expect(JSON.stringify(client.requests.find((entry) => entry.method === "turn/start")?.params.input))
+        .toContain("requested_model=gpt-5.6-luna");
       expect(events).toContainEqual({ type: "thread", threadId: "thread-1" });
     }
   });

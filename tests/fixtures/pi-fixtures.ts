@@ -7,6 +7,7 @@ import { computerProviderContext } from "../provider-fixtures";
 export class FakePiSession implements PiSessionLike {
   sessionId = "pi-session-id";
   sessionFile = "/tmp/pi-sessions/session.jsonl";
+  model?: { provider: string; id: string };
   listeners: Array<(event: unknown) => void> = [];
   steer = vi.fn(async () => undefined);
   followUp = vi.fn(async () => undefined);

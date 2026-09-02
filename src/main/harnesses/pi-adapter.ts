@@ -7,18 +7,19 @@ import {
   SessionManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_PI_MODEL } from "../../shared/contracts";
+import { DEFAULT_OPENROUTER_MODEL, DEFAULT_PI_MODEL } from "../../shared/contracts";
 import type { HarnessControl, HarnessControlResult } from "../../shared/harness-contracts";
 import { piCredentialStatus, resolveOpenRouterCredential } from "../credentials";
 import type { ProviderRunContext } from "../providers/types";
 import { PiEventMapper } from "./pi-events";
 import { createPiResourceLoader } from "./pi-resources";
 import { createPiTools } from "./pi-tools";
-import type { HarnessAdapter } from "./types";
+import type { HarnessAdapter, HarnessHealthContext } from "./types";
 
 export interface PiSessionLike {
   sessionId: string;
   sessionFile?: string;
+  model?: PiModelIdentity;
   subscribe(listener: (event: unknown) => void): () => void;
   prompt(text: string): Promise<void>;
   steer(text: string): Promise<void>;
@@ -30,6 +31,24 @@ export interface PiSessionLike {
 }
 
 export type PiSessionFactory = (context: ProviderRunContext, existingSession?: string) => Promise<PiSessionLike>;
+
+interface PiModelIdentity {
+  provider: string;
+  id: string;
+}
+
+const PI_MAX_OUTPUT_TOKENS = 16_384;
+
+export function capPiModelOutputTokens<T extends { maxTokens: number }>(model: T): T {
+  if (model.maxTokens <= PI_MAX_OUTPUT_TOKENS) return model;
+  return { ...model, maxTokens: PI_MAX_OUTPUT_TOKENS };
+}
+
+export function preferredAutomaticPiModel<T extends PiModelIdentity>(models: readonly T[]): T | undefined {
+  return models.find((model) => model.provider === "openrouter" && model.id === DEFAULT_OPENROUTER_MODEL)
+    ?? models.find((model) => model.provider === "openrouter")
+    ?? models[0];
+}
 
 function splitModel(value: string): { provider: string; modelId: string } {
   const separator = value.indexOf("/");
@@ -49,23 +68,31 @@ export function defaultPiSessionFactory(homeDirectory: string, sessionRoot = joi
     const cwd = context.conversation.workingDirectory;
     const agentDir = process.env.PI_CODING_AGENT_DIR || join(homeDirectory, ".pi", "agent");
     const sessionDirectory = join(sessionRoot, createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 24));
-    await mkdir(sessionDirectory, { recursive: true });
     const requested = context.conversation.model === DEFAULT_PI_MODEL ? undefined : splitModel(context.conversation.model);
-    const modelRuntime = await ModelRuntime.create({
-      authPath: join(agentDir, "auth.json"),
-      modelsPath: join(agentDir, "models.json"),
-      allowModelNetwork: false,
-    });
-    if (requested?.provider === "openrouter") {
-      const credential = await resolveOpenRouterCredential(context.settings, homeDirectory);
-      if (credential) await modelRuntime.setRuntimeApiKey("openrouter", credential.apiKey);
+    const [modelRuntime, openRouterCredential] = await Promise.all([
+      ModelRuntime.create({
+        authPath: join(agentDir, "auth.json"),
+        modelsPath: join(agentDir, "models.json"),
+        allowModelNetwork: false,
+      }),
+      !requested || requested.provider === "openrouter"
+        ? resolveOpenRouterCredential(context.settings, homeDirectory)
+        : Promise.resolve(null),
+      mkdir(sessionDirectory, { recursive: true }),
+    ]);
+    if (openRouterCredential) await modelRuntime.setRuntimeApiKey("openrouter", openRouterCredential.apiKey);
+    let available = requested ? [] : await modelRuntime.getAvailable();
+    if (!requested && openRouterCredential && !available.some((candidate) => candidate.provider === "openrouter")) {
+      await modelRuntime.refresh().catch(() => undefined);
+      available = await modelRuntime.getAvailable();
     }
-    let model = requested ? modelRuntime.getModel(requested.provider, requested.modelId) : (await modelRuntime.getAvailable())[0];
+    let model = requested ? modelRuntime.getModel(requested.provider, requested.modelId) : preferredAutomaticPiModel(available);
     if (!model && requested?.provider === "openrouter" && modelRuntime.hasConfiguredAuth(requested.provider)) {
       await modelRuntime.refresh().catch(() => undefined);
       model = modelRuntime.getModel(requested.provider, requested.modelId);
     }
     if (!model) throw new Error(`Pi model ${context.conversation.model} is unavailable or not configured`);
+    const sessionModel = capPiModelOutputTokens(model);
     const resourceLoader = await createPiResourceLoader({ cwd, agentDir, selectedSkillPaths: context.selectedSkillPaths });
     const customTools = createPiTools(context);
     const sessionManager = existingSession
@@ -75,7 +102,7 @@ export function defaultPiSessionFactory(homeDirectory: string, sessionRoot = joi
       cwd,
       agentDir,
       modelRuntime,
-      model,
+      model: sessionModel,
       thinkingLevel: context.conversation.reasoning,
       resourceLoader,
       sessionManager,
@@ -83,7 +110,7 @@ export function defaultPiSessionFactory(homeDirectory: string, sessionRoot = joi
       tools: customTools.map((tool) => tool.name),
       customTools,
     });
-    return session as AgentSession;
+    return session;
   };
 }
 
@@ -123,8 +150,8 @@ export class PiAdapter implements HarnessAdapter {
     private readonly sessionFactory: PiSessionFactory = defaultPiSessionFactory(homeDirectory),
   ) {}
 
-  async health() {
-    const { id: _provider, ...status } = await piCredentialStatus(this.homeDirectory);
+  async health(context: HarnessHealthContext) {
+    const { id: _provider, ...status } = await piCredentialStatus(this.homeDirectory, context.settings);
     return status;
   }
 
@@ -150,11 +177,28 @@ export class PiAdapter implements HarnessAdapter {
     context.signal.addEventListener("abort", abort, { once: true });
     try {
       if (context.signal.aborted) throw new Error("Pi run was cancelled before start");
-      await session.prompt(context.prompt);
+      const harnessId = context.conversation.harnessId ?? this.descriptor.id;
+      const resolvedModel = session.model ? `${session.model.provider}/${session.model.id}` : context.conversation.model;
+      await session.prompt([
+        `Runtime configuration supplied by PuckBot: provider=pi, harness=${harnessId}, requested_model=${context.conversation.model}, resolved_model=${resolvedModel}. If asked what model you are using, report both requested and resolved values.`,
+        "",
+        "User request:",
+        context.prompt,
+      ].join("\n"));
       await eventQueue;
       const final = mapper.finalText(session.getLastAssistantText());
-      if (!final) throw new Error(`Pi completed without a final text response${mapper.failureDetail() ? `: ${mapper.failureDetail()}` : ""}`);
-      await context.onEvent({ type: "final", text: final });
+      if (!final) throw new Error(`Pi (${resolvedModel}) completed without a final text response${mapper.failureDetail() ? `: ${mapper.failureDetail()}` : ""}`);
+      await context.onEvent({
+        type: "final",
+        text: final,
+        runtime: {
+          provider: "pi",
+          harnessId,
+          requestedModel: context.conversation.model,
+          resolvedModel,
+          reasoning: context.conversation.reasoning,
+        },
+      });
       const stats = session.getSessionStats();
       await context.onEvent({ type: "usage", usage: {
         inputTokens: stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite,

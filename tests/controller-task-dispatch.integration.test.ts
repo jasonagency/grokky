@@ -233,10 +233,14 @@ describe("controller task dispatch", () => {
       ]);
       expect(controller.snapshot().workspaceState!.leases).toHaveLength(2);
       expect(controller.snapshot().workspaceState!.leases.every((lease) => lease.status === "completed")).toBe(true);
-      const events = (await database.listEvents()).map((value) => JSON.parse(value) as { taskId?: string; attemptId?: string; type: string });
+      const events = (await database.listEvents()).map((value) => JSON.parse(value) as { taskId?: string; attemptId?: string; type: string; payload?: { message?: { provider?: string; runtime?: { requestedModel?: string } } } });
       expect(events.filter((event) => event.type === "run.completed")).toEqual([
         expect.objectContaining({ taskId: "research", attemptId: expect.any(String) }),
         expect.objectContaining({ taskId: "report", attemptId: expect.any(String) }),
+      ]);
+      expect(events.filter((event) => event.type === "run.final")).toEqual([
+        expect.objectContaining({ payload: { message: expect.objectContaining({ provider: "codex", runtime: expect.objectContaining({ requestedModel: expect.any(String) }) }) } }),
+        expect.objectContaining({ payload: { message: expect.objectContaining({ provider: "codex", runtime: expect.objectContaining({ requestedModel: expect.any(String) }) }) } }),
       ]);
     } finally {
       await controller.shutdown();

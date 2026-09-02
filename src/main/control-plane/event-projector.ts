@@ -68,6 +68,7 @@ function applyOrchestration(conversation: Conversation, event: OrchestrationEven
           ...(icon ? { icon } : {}),
           ...(event.prompt && event.tool !== "wait" ? { task: event.prompt } : {}),
           ...(thread.message ? { result: thread.message } : {}),
+          ...(thread.runtime ? { runtime: thread.runtime } : {}),
           updatedAt: timestamp,
         };
       } else {
@@ -80,6 +81,7 @@ function applyOrchestration(conversation: Conversation, event: OrchestrationEven
           task: event.prompt || "Delegated task",
           status,
           ...(thread.message ? { result: thread.message } : {}),
+          ...(thread.runtime ? { runtime: thread.runtime } : {}),
           createdAt: timestamp,
           updatedAt: timestamp,
         });

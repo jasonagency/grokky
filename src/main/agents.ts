@@ -40,7 +40,7 @@ const BUILT_IN_AGENTS: AgentDefinition[] = [
 ];
 
 export function agentRoleFingerprint(agent: AgentDefinition): string {
-  return createHash("sha256").update(JSON.stringify({ name: agent.name, description: agent.description, developerInstructions: agent.developerInstructions, scope: agent.scope, model: agent.model ?? null, reasoning: agent.reasoning ?? null, sandboxMode: agent.sandboxMode ?? null })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ name: agent.name, description: agent.description, developerInstructions: agent.developerInstructions, scope: agent.scope, model: agent.model ?? null, providerModels: agent.providerModels ?? null, reasoning: agent.reasoning ?? null, sandboxMode: agent.sandboxMode ?? null })).digest("hex");
 }
 
 function parseTomlString(content: string, key: string): string | undefined {
@@ -88,6 +88,7 @@ function normalizeDraft(value: AgentDraft): AgentDraft {
     scope: value.scope,
     ...(value.icon ? { icon: value.icon } : {}),
     ...(value.model ? { model: value.model } : {}),
+    ...(value.providerModels?.openrouter ? { providerModels: { openrouter: value.providerModels.openrouter } } : {}),
     ...(value.reasoning ? { reasoning: value.reasoning } : {}),
     ...(value.sandboxMode ? { sandboxMode: value.sandboxMode } : {}),
   };
@@ -99,6 +100,7 @@ function serializeAgent(draft: AgentDraft): string {
     `name = ${JSON.stringify(draft.name)}`,
     `description = ${JSON.stringify(draft.description)}`,
     ...(draft.model ? [`model = ${JSON.stringify(draft.model)}`] : []),
+    ...(draft.providerModels?.openrouter ? [`# puckbot_openrouter_model = ${JSON.stringify(draft.providerModels.openrouter)}`] : []),
     ...(draft.reasoning ? [`model_reasoning_effort = ${JSON.stringify(draft.reasoning)}`] : []),
     ...(draft.sandboxMode ? [`sandbox_mode = ${JSON.stringify(draft.sandboxMode)}`] : []),
     `developer_instructions = ${JSON.stringify(draft.developerInstructions)}`,
@@ -114,6 +116,7 @@ async function readAgent(pathname: string, scope: "personal" | "project"): Promi
     const developerInstructions = parseTomlString(content, "developer_instructions");
     if (!description || !developerInstructions) return null;
     const model = parseTomlString(content, "model");
+    const openRouterModel = parseCommentString(content, "puckbot_openrouter_model");
     const reasoning = parseTomlString(content, "model_reasoning_effort");
     const sandboxMode = parseTomlString(content, "sandbox_mode");
     const icon = parseCommentString(content, "grokky_icon");
@@ -127,6 +130,7 @@ async function readAgent(pathname: string, scope: "personal" | "project"): Promi
       path: pathname,
       ...(iconValues.has(icon as AgentIcon) ? { icon: icon as AgentIcon } : {}),
       ...(model ? { model } : {}),
+      ...(openRouterModel ? { providerModels: { openrouter: openRouterModel } } : {}),
       ...(reasoningValues.has(reasoning as ReasoningEffort) ? { reasoning: reasoning as ReasoningEffort } : {}),
       ...(sandboxValues.has(sandboxMode as SandboxMode) ? { sandboxMode: sandboxMode as SandboxMode } : {}),
     };

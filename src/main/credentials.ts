@@ -63,22 +63,25 @@ export async function resolveOpenRouterCredential(
 }
 
 export async function providerStatuses(settings: AppSettings, homeDirectory: string): Promise<ProviderStatus[]> {
-  return Promise.all([codexCredentialStatus(homeDirectory), openRouterCredentialStatus(settings, homeDirectory), piCredentialStatus(homeDirectory)]);
+  return Promise.all([codexCredentialStatus(homeDirectory), openRouterCredentialStatus(settings, homeDirectory), piCredentialStatus(homeDirectory, settings)]);
 }
 
-export async function piCredentialStatus(homeDirectory: string): Promise<ProviderStatus> {
+export async function piCredentialStatus(homeDirectory: string, settings?: AppSettings): Promise<ProviderStatus> {
   const authPath = process.env.PI_CODING_AGENT_DIR
     ? join(process.env.PI_CODING_AGENT_DIR, "auth.json")
     : join(homeDirectory, ".pi", "agent", "auth.json");
   const stored = await access(authPath, constants.R_OK).then(() => true).catch(() => false);
   const inherited = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]
     .some((key) => Boolean(process.env[key]?.trim()));
-  const ready = stored || inherited;
+  const configuredOpenRouter = !stored && !inherited && settings
+    ? await resolveOpenRouterCredential(settings, homeDirectory)
+    : null;
+  const ready = stored || inherited || Boolean(configuredOpenRouter);
   return {
     id: "pi",
     ready,
     label: ready ? "Pi credentials available" : "Pi credentials missing",
-    source: stored ? "Saved Pi credential store" : inherited ? "Process environment" : authPath,
+    source: stored ? "Saved Pi credential store" : inherited ? "Process environment" : configuredOpenRouter?.source ?? authPath,
     detail: ready
       ? "Credentials stay in the Electron main process and Pi model runtime."
       : "Add a provider credential with Pi or set a supported provider API key, then refresh status.",

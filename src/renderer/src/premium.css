@@ -636,6 +636,23 @@ summary:focus-visible,
   padding: 1px 2px;
 }
 
+.runtime-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 9px 2px 0;
+}
+
+.runtime-receipt span {
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
 .message-avatar {
   margin-top: 15px;
 }

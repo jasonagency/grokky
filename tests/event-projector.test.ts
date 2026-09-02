@@ -44,7 +44,7 @@ describe("event projector", () => {
   test("projects provider, orchestration, usage, approval, audit, and final events", () => {
     const projector = new EventProjector([conversation()]);
     projector.apply(event(1, "provider.activity", { activity: { id: "activity", kind: "files", label: "Changed a file", status: "completed", createdAt: 2 } }));
-    projector.apply(event(2, "orchestration.updated", { event: { operationId: "spawn", tool: "spawn_agent", senderThreadId: "lead", receiverThreads: [{ threadId: "agent-1", name: "Builder", status: "working" }], prompt: "Implement it", status: "running" } }));
+    projector.apply(event(2, "orchestration.updated", { event: { operationId: "spawn", tool: "spawn_agent", senderThreadId: "lead", receiverThreads: [{ threadId: "agent-1", name: "Builder", status: "working", runtime: { provider: "openrouter", harnessId: "openrouter-chat", requestedModel: "test/model", resolvedModel: "resolved/model", reasoning: "medium" } }], prompt: "Implement it", status: "running" } }));
     projector.apply(event(3, "usage.updated", { usage: { inputTokens: 20, outputTokens: 10, costUsd: 0.02 } }));
     const approval = projector.apply(event(4, "approval.requested", { approval: { id: "approval-1", deviceId: "local", deviceName: "Mac", conversationId: "conversation-1", capability: "commands", action: "run command", target: "npm test", createdAt: 4 } }));
     const audit = projector.apply(event(5, "audit.recorded", { audit: { id: "audit-1", deviceId: "local", conversationId: "conversation-1", provider: "codex", capability: "commands", action: "run_command", target: "npm test", decision: "allowed", status: "completed", createdAt: 5 } }));
@@ -52,7 +52,7 @@ describe("event projector", () => {
 
     expect(projector.conversation("conversation-1")).toMatchObject({
       activities: [{ id: "activity", status: "completed" }],
-      agentRuns: [{ threadId: "agent-1", name: "Builder", status: "working" }],
+      agentRuns: [{ threadId: "agent-1", name: "Builder", status: "working", runtime: { requestedModel: "test/model", resolvedModel: "resolved/model" } }],
       usage: { inputTokens: 20, outputTokens: 10, costUsd: 0.02 },
       messages: [{ id: "answer", content: "Done" }],
     });

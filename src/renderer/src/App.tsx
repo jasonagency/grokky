@@ -78,6 +78,8 @@ import { EvalComparison } from "./features/evaluations/EvalComparison";
 import { AgentComputerView } from "./features/computer/AgentComputerView";
 import { UpdateBanner } from "./features/updates/UpdateBanner";
 import type { ScreenLease } from "../../shared/remote-protocol";
+import { canSubmitComposer, composerFocusTransition, type ComposerFocusState } from "./composer-focus";
+import { providerLabel, runtimeReceiptParts } from "./runtime-receipt";
 
 const OPENROUTER_SUGGESTIONS = [
   "openai/gpt-5.2",
@@ -314,10 +316,6 @@ function compactPath(pathname: string): string {
   return `…/${parts.slice(-3).join("/")}`;
 }
 
-function providerName(provider: ProviderId): string {
-  return provider === "codex" ? "Codex" : provider === "pi" ? "Pi" : "OpenRouter";
-}
-
 function InlineLoader({ label = "Working", quiet = false }: { label?: string; quiet?: boolean }) {
   return (
     <span className={`inline-loader ${quiet ? "quiet" : ""}`} role="status" aria-label={label}>
@@ -432,6 +430,11 @@ function MessageList({ conversation, agents }: { conversation: Conversation; age
                     <time>{timeLabel(message.createdAt)}</time>
                   </header>
                   <div className="message-content"><MarkdownMessage content={message.content} /></div>
+                  {message.role === "assistant" && message.runtime && (
+                    <footer className="runtime-receipt" aria-label="Run configuration">
+                      {runtimeReceiptParts(message.runtime).map((part) => <span key={part}>{part}</span>)}
+                    </footer>
+                  )}
                 </div>
                 {message.role === "user" && index === latestUserIndex && (
                   <>
@@ -669,7 +672,13 @@ function CrewRunRow({ run, activities, now }: { run: AgentRun; activities: Activ
   );
   const stateClass = queued ? " is-queued" : unconfirmed ? " is-unconfirmed" : "";
   if (!run.result) return <div className={`crew-run-row status-${run.status}${stateClass}`}>{content}</div>;
-  return <details className={`crew-run-row status-${run.status}${stateClass}`}><summary>{content}<CaretDown size={13} /></summary><p>{run.result}</p></details>;
+  return (
+    <details className={`crew-run-row status-${run.status}${stateClass}`}>
+      <summary>{content}<CaretDown size={13} /></summary>
+      <p>{run.result}</p>
+      {run.runtime && <footer className="runtime-receipt" aria-label={`${run.name} run configuration`}>{runtimeReceiptParts(run.runtime).map((part) => <span key={part}>{part}</span>)}</footer>}
+    </details>
+  );
 }
 
 function CrewPicker({ conversation, agents, enabled, maxAgents, onOpenAgents, onError }: {
@@ -933,6 +942,10 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
   const [projectOpenRequest, setProjectOpenRequest] = useState(0);
   const [accessOpenRequest, setAccessOpenRequest] = useState(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const composerWrap = useRef<HTMLDivElement>(null);
+  const focusState = useRef<ComposerFocusState>({ restoreAfterRun: false, wasRunning: false });
+  const focusFrame = useRef<number | null>(null);
+  const submissionPending = useRef(false);
 
   useEffect(() => {
     const listener = (event: Event) => {
@@ -946,7 +959,39 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
   useEffect(() => {
     setDraft("");
     setPreflightTarget(null);
+    submissionPending.current = false;
+    if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = null;
+    focusState.current = composerFocusTransition(focusState.current, { type: "reset" }).state;
   }, [conversation.id]);
+
+  useEffect(() => {
+    const transition = composerFocusTransition(focusState.current, { type: "status", status: conversation.status });
+    focusState.current = transition.state;
+    if (conversation.status === "running") submissionPending.current = false;
+    if (transition.focus) {
+      focusFrame.current = requestAnimationFrame(() => {
+        focusFrame.current = null;
+        textarea.current?.focus();
+      });
+    }
+  }, [conversation.status]);
+
+  useEffect(() => {
+    const cancelFocusReturn = (event: PointerEvent) => {
+      if (event.target instanceof Node && !composerWrap.current?.contains(event.target)) {
+        focusState.current = composerFocusTransition(focusState.current, { type: "pointer-away" }).state;
+        if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+        focusFrame.current = null;
+      }
+    };
+    document.addEventListener("pointerdown", cancelFocusReturn);
+    return () => {
+      document.removeEventListener("pointerdown", cancelFocusReturn);
+      if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+      focusFrame.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (preflightTarget === "project" && conversation.projectMode === "project") setPreflightTarget(null);
@@ -955,7 +1000,7 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
 
   async function submit() {
     const value = draft.trim();
-    if (!value || conversation.status === "running") return;
+    if (!canSubmitComposer(value, conversation.status, submissionPending.current)) return;
     if (conversation.projectMode === "none" && requiresProjectDirectory(value)) {
       setPreflightTarget("project");
       setProjectOpenRequest((request) => request + 1);
@@ -967,17 +1012,22 @@ function Composer({ conversation, agents, recentDirectories, multiAgentEnabled, 
       return;
     }
     setPreflightTarget(null);
+    submissionPending.current = true;
+    focusState.current = composerFocusTransition(focusState.current, { type: "submitted" }).state;
     setDraft("");
     try {
       await window.grokky.sendMessage(conversation.id, value);
     } catch (error) {
+      submissionPending.current = false;
+      focusState.current = composerFocusTransition(focusState.current, { type: "reset" }).state;
       setDraft(value);
+      requestAnimationFrame(() => textarea.current?.focus());
       onError(error instanceof Error ? error.message : "Message could not be sent");
     }
   }
 
   return (
-    <div className="composer-wrap">
+    <div className="composer-wrap" ref={composerWrap}>
       {conversation.status === "running" && !conversation.selectedAgentIds.length && <BotMascot mood={conversationMood(conversation)} identity={`conversation:${conversation.id}`} size="sm" className="composer-bot" label="PuckBot is working" />}
       <div className={`composer ${conversation.status === "running" ? "is-running" : ""}`}>
         <textarea
@@ -1266,6 +1316,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
       scope: agent.scope === "project" ? "project" : "personal",
       icon: agent.icon ?? botVariantForIdentity(agent.name),
       ...(agent.model ? { model: agent.model } : {}),
+      ...(agent.providerModels ? { providerModels: { ...agent.providerModels } } : {}),
       ...(agent.reasoning ? { reasoning: agent.reasoning } : {}),
       ...(agent.sandboxMode ? { sandboxMode: agent.sandboxMode } : {}),
     }, agent.builtIn ? null : agent.id);
@@ -1610,7 +1661,8 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                     <label className="agent-field agent-instructions"><span>Instructions</span><textarea value={agentDraft.developerInstructions} onChange={(event) => setAgentDraft({ ...agentDraft, developerInstructions: event.target.value })} placeholder="Describe the role, method, constraints, and expected result." /></label>
                     <div className="agent-form-grid">
                       <div className="agent-field"><span>Scope</span><SelectMenu value={agentDraft.scope} choices={AGENT_SCOPE_CHOICES} label="Agent scope" disabled={Boolean(editingAgentId)} onChange={(scope) => setAgentDraft({ ...agentDraft, scope })} /></div>
-                      <div className="agent-field"><span>Model</span><SelectMenu value={agentDraft.model ?? ""} choices={OPTIONAL_MODEL_CHOICES} label="Agent model" onChange={(model) => setAgentDraft({ ...agentDraft, model: model || undefined })} /></div>
+                      <div className="agent-field"><span>Codex model</span><SelectMenu value={agentDraft.model ?? ""} choices={OPTIONAL_MODEL_CHOICES} label="Agent Codex model" onChange={(model) => setAgentDraft({ ...agentDraft, model: model || undefined })} /></div>
+                      <div className="agent-field"><span>OpenRouter model</span><ModelCombobox value={agentDraft.providerModels?.openrouter ?? ""} suggestions={OPENROUTER_SUGGESTIONS} label="Agent OpenRouter model" allowEmpty placeholder="Inherit from chat" onCommit={(model) => setAgentDraft({ ...agentDraft, providerModels: model ? { openrouter: model } : undefined })} /></div>
                       <div className="agent-field"><span>Reasoning</span><SelectMenu value={agentDraft.reasoning ?? ""} choices={OPTIONAL_REASONING_CHOICES} label="Agent reasoning" onChange={(reasoning) => setAgentDraft({ ...agentDraft, reasoning: reasoning || undefined })} /></div>
                       <div className="agent-field"><span>Workspace</span><SelectMenu value={agentDraft.sandboxMode ?? ""} choices={OPTIONAL_SANDBOX_CHOICES} label="Agent workspace permission" onChange={(sandboxMode) => setAgentDraft({ ...agentDraft, sandboxMode: sandboxMode || undefined })} /></div>
                     </div>
@@ -1634,7 +1686,7 @@ function SettingsDialog({ snapshot, conversation, agents, initialTab, openTaskRe
                     <SelectMenu value={snapshot.settings.maxAgentThreads} choices={MAX_AGENT_CHOICES} label="Maximum parallel workers" disabled={!snapshot.settings.multiAgentEnabled} onChange={(maxAgentThreads) => void patchSettings({ maxAgentThreads })} />
                   </div>
                   <div className="agent-form-grid agent-defaults">
-                    <div className="agent-field"><span>Default subagent model</span><SelectMenu value={snapshot.settings.defaultSubagentModel} choices={OPTIONAL_MODEL_CHOICES} label="Default subagent model" disabled={!snapshot.settings.multiAgentEnabled} onChange={(defaultSubagentModel) => void patchSettings({ defaultSubagentModel })} /></div>
+                    <div className="agent-field"><span>Default Codex subagent model</span><SelectMenu value={snapshot.settings.defaultSubagentModel} choices={OPTIONAL_MODEL_CHOICES} label="Default Codex subagent model" disabled={!snapshot.settings.multiAgentEnabled} onChange={(defaultSubagentModel) => void patchSettings({ defaultSubagentModel })} /></div>
                     <div className="agent-field"><span>Default reasoning</span><SelectMenu value={snapshot.settings.defaultSubagentReasoning} choices={OPTIONAL_REASONING_CHOICES} label="Default subagent reasoning" disabled={!snapshot.settings.multiAgentEnabled} onChange={(defaultSubagentReasoning) => void patchSettings({ defaultSubagentReasoning })} /></div>
                   </div>
                   <div className={`settings-row ${!snapshot.settings.multiAgentEnabled ? "disabled" : ""}`}>
@@ -1901,7 +1953,7 @@ export function App() {
             <div className="session-entry" key={conversation.id}>
               <button className={`session-item ${conversation.id === active.id ? "active" : ""}`} type="button" onClick={() => void window.grokky.setActiveConversation(conversation.id)}>
                 <BotMascot mood={conversationMood(conversation)} identity={`conversation:${conversation.id}`} size="xs" />
-                <span><strong>{conversation.title}</strong><small>{providerName(conversation.provider)}<i />{timeLabel(conversation.updatedAt)}</small></span>
+                <span><strong>{conversation.title}</strong><small>{providerLabel(conversation.provider)}<i />{timeLabel(conversation.updatedAt)}</small></span>
                 {conversation.status === "running" && <InlineLoader label={`${conversation.title} is running`} quiet />}
               </button>
               {conversation.status !== "running" && conversation.id === active.id && (

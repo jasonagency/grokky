@@ -87,7 +87,20 @@ export class HarnessRegistry {
     const adapter = this.requireCompatible(resolved.descriptor.id, required);
     await adapter.run({
       ...context,
-      onEvent: async (event) => context.onEvent(validateHarnessEvent(event)),
+      onEvent: async (event) => {
+        const enriched = event.type === "final" && !event.runtime
+          ? {
+              ...event,
+              runtime: {
+                provider: conversation.provider,
+                harnessId: resolved.descriptor.id,
+                requestedModel: conversation.model,
+                reasoning: conversation.reasoning,
+              },
+            }
+          : event;
+        await context.onEvent(validateHarnessEvent(enriched));
+      },
     });
   }
 
